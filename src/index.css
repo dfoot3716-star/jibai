@@ -1,0 +1,48 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Playfair+Display:ital,wght@0,400;0,500;1,400&display=swap');
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Playfair Display", serif;
+}
+
+:root {
+  --dawn-start: #E0E7FF;
+  --dawn-end: #F0F9FF;
+  --day-start: #BFDBFE;
+  --day-end: #EFF6FF;
+  --evening-start: #C084FC;
+  --evening-end: #4F46E5;
+  --night-start: #1e1e1e;
+  --night-end: #121212;
+}
+
+body {
+  @apply font-sans text-slate-900 antialiased overflow-hidden;
+  font-weight: 300;
+}
+
+.glass {
+  @apply bg-white/5 backdrop-blur-sm border border-white/10;
+}
+
+.glass-dark {
+  @apply bg-black/5 backdrop-blur-sm border border-white/5;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
