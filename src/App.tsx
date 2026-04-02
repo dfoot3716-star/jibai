@@ -837,48 +837,50 @@ export default function App() {
           ) : (
             <>
               {/* Header */}
-              <header className="p-8 pb-4 flex justify-between items-end shrink-0">
-                <div className="flex items-center gap-4">
-                  {!isSameDay(selectedDate, new Date()) && activeTab === 'list' && (
-                    <button 
-                      onClick={() => { playSound('click'); setActiveTab('calendar'); }}
-                      className="p-2 glass rounded-full opacity-60 hover:opacity-100 transition-opacity"
-                    >
-                      <ChevronLeft size={20} />
-                    </button>
-                  )}
-                  <div>
-                    <h1 className="text-4xl font-serif italic tracking-tight">既白</h1>
-                    <p className="text-xs opacity-60 mt-1 font-medium tracking-widest uppercase">
-                      {format(selectedDate, 'MMMM do, EEEE')}
-                    </p>
+              {!isChatting && (
+                <header className="p-8 pb-4 flex justify-between items-end shrink-0">
+                  <div className="flex items-center gap-4">
+                    {!isSameDay(selectedDate, new Date()) && activeTab === 'list' && (
+                      <button 
+                        onClick={() => { playSound('click'); setActiveTab('calendar'); }}
+                        className="p-2 glass rounded-full opacity-60 hover:opacity-100 transition-opacity"
+                      >
+                        <ChevronLeft size={20} />
+                      </button>
+                    )}
+                    <div>
+                      <h1 className="text-4xl font-serif italic tracking-tight">既白</h1>
+                      <p className="text-xs opacity-60 mt-1 font-medium tracking-widest uppercase">
+                        {format(selectedDate, 'MMMM do, EEEE')}
+                      </p>
+                    </div>
                   </div>
-                </div>
-                
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-3">
-                    <button 
-                      onClick={generateWeeklyInsight}
-                      className="p-2 glass rounded-full text-blue-400 hover:text-blue-300 transition-colors"
-                      title="星空周报"
-                    >
-                      <Sparkles size={18} />
-                    </button>
-                    <button 
-                      onClick={() => { playSound('click'); setShowProfileModal(true); }}
-                      className="relative group transition-transform active:scale-95"
-                    >
-                      <img 
-                        src={userProfile?.photoURL || user.photoURL || `https://ui-avatars.com/api/?name=${userProfile?.displayName || user.displayName || 'User'}`} 
-                        alt="Avatar" 
-                        className="w-8 h-8 rounded-full border border-white/20 group-hover:border-blue-400/50 transition-colors object-cover"
-                        referrerPolicy="no-referrer"
-                      />
-                      <div className="absolute inset-0 rounded-full bg-blue-400/10 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    </button>
+                  
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-3">
+                      <button 
+                        onClick={generateWeeklyInsight}
+                        className="p-2 glass rounded-full text-blue-400 hover:text-blue-300 transition-colors"
+                        title="星空周报"
+                      >
+                        <Sparkles size={18} />
+                      </button>
+                      <button 
+                        onClick={() => { playSound('click'); setShowProfileModal(true); }}
+                        className="relative group transition-transform active:scale-95"
+                      >
+                        <img 
+                          src={userProfile?.photoURL || user.photoURL || `https://ui-avatars.com/api/?name=${userProfile?.displayName || user.displayName || 'User'}`} 
+                          alt="Avatar" 
+                          className="w-8 h-8 rounded-full border border-white/20 group-hover:border-blue-400/50 transition-colors object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                        <div className="absolute inset-0 rounded-full bg-blue-400/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              </header>
+                </header>
+              )}
 
               {/* Content */}
               <main className="flex-1 overflow-y-auto px-4 py-4 custom-scrollbar">
@@ -1011,105 +1013,43 @@ export default function App() {
                 exit={{ opacity: 0, y: -10 }}
                 className="h-full flex flex-col space-y-6"
               >
-                <div className={cn(
-                  "flex-1 flex flex-col overflow-hidden relative transition-all duration-500 rounded-[2.5rem] p-4",
-                  !isChatting ? "bg-white/5 backdrop-blur-sm" : "bg-transparent"
-                )}>
-                  {!isChatting ? (
-                    <>
-                      <div className="flex justify-between items-center mb-8 px-2">
-                        <div className="flex items-center gap-4">
-                          <p className="text-[10px] uppercase tracking-[0.4em] opacity-40 font-bold">每日心语</p>
-                          <button 
-                            onClick={() => setShowMoodModal(true)}
-                            className="flex items-center gap-2 px-3 py-1 glass rounded-full hover:bg-white/5 transition-colors"
-                          >
-                            <div 
-                              className="w-2 h-2 rounded-full" 
-                              style={{ 
-                                backgroundColor: selectedMood,
-                                boxShadow: `0 0 8px ${selectedMood}80`
-                              }} 
-                            />
-                            <span className="text-[10px] opacity-60 tracking-widest">
-                              {MOOD_COLORS.find(m => m.color === selectedMood)?.name || '记录心情'}
-                            </span>
-                          </button>
-                        </div>
-                        <button 
-                          onClick={() => setIsChatting(true)}
-                          className="p-2 glass rounded-full opacity-60 hover:opacity-100 transition-opacity"
-                        >
-                          <MessageSquare size={18} />
-                        </button>
-                      </div>
-                      <textarea
-                        value={diaryContent}
-                        onChange={(e) => {
-                          setDiaryContent(e.target.value);
-                          saveDiary(e.target.value);
-                        }}
-                        placeholder="此刻，你想记录下什么？"
-                        className="flex-1 bg-transparent border-none focus:ring-0 outline-none px-2 text-lg font-light leading-relaxed placeholder:opacity-20 resize-none custom-scrollbar min-h-[200px]"
-                        spellCheck={false}
-                      />
-                    </>
-                  ) : (
-                    <div className="flex flex-col h-full">
-                      <div className="flex justify-between items-center mb-8 px-2">
-                        <p className="text-[10px] uppercase tracking-[0.4em] opacity-40 font-bold">星空对话</p>
-                        <button 
-                          onClick={() => setIsChatting(false)}
-                          className="p-2 glass rounded-full opacity-60 hover:opacity-100 transition-opacity"
-                        >
-                          <ChevronLeft size={18} />
-                        </button>
-                      </div>
-                      
-                      <div className="flex-1 overflow-y-auto space-y-4 mb-4 custom-scrollbar pr-2">
-                        {currentDiary.chatHistory.length === 0 && (
-                          <div className="h-full flex items-center justify-center opacity-20 text-center px-8">
-                            <p className="text-sm italic">“在这里，你可以和我聊聊今天的感悟。”</p>
-                          </div>
-                        )}
-                        {currentDiary.chatHistory.map((msg, i) => (
-                          <div key={i} className={cn(
-                            "max-w-full p-4 rounded-3xl text-sm leading-relaxed shadow-sm",
-                            msg.role === 'user' 
-                              ? "ml-auto bg-blue-500/10 text-blue-100 rounded-tr-none" 
-                              : "mr-auto glass text-white rounded-tl-none"
-                          )}>
-                            {msg.text}
-                          </div>
-                        ))}
-                        {isAiLoading && (
-                          <div className="mr-auto glass p-4 rounded-3xl rounded-tl-none flex gap-1">
-                            <motion.div animate={{ opacity: [0.2, 1, 0.2] }} transition={{ repeat: Infinity, duration: 1 }} className="w-1 h-1 bg-white rounded-full" />
-                            <motion.div animate={{ opacity: [0.2, 1, 0.2] }} transition={{ repeat: Infinity, duration: 1, delay: 0.2 }} className="w-1 h-1 bg-white rounded-full" />
-                            <motion.div animate={{ opacity: [0.2, 1, 0.2] }} transition={{ repeat: Infinity, duration: 1, delay: 0.4 }} className="w-1 h-1 bg-white rounded-full" />
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="relative pt-4 pb-2">
-                        <input
-                          type="text"
-                          value={chatInput}
-                          onChange={(e) => setChatInput(e.target.value)}
-                          onKeyDown={(e) => e.key === 'Enter' && handleAiChat()}
-                          placeholder="向星空提问..."
-                          className="w-full bg-transparent border-none py-4 pl-2 pr-12 text-base font-light focus:ring-0 outline-none placeholder:opacity-20"
+                <div className="flex-1 flex flex-col overflow-hidden relative bg-white/5 backdrop-blur-sm rounded-[2.5rem] p-8">
+                  <div className="flex justify-between items-center mb-8 px-2">
+                    <div className="flex items-center gap-4">
+                      <p className="text-[10px] uppercase tracking-[0.4em] opacity-40 font-bold">每日心语</p>
+                      <button 
+                        onClick={() => setShowMoodModal(true)}
+                        className="flex items-center gap-2 px-3 py-1 glass rounded-full hover:bg-white/5 transition-colors"
+                      >
+                        <div 
+                          className="w-2 h-2 rounded-full" 
+                          style={{ 
+                            backgroundColor: selectedMood,
+                            boxShadow: `0 0 8px ${selectedMood}80`
+                          }} 
                         />
-                        <button 
-                          onClick={handleAiChat}
-                          disabled={isAiLoading}
-                          className="absolute right-0 top-1/2 -translate-y-1/2 p-2 text-blue-400 hover:text-blue-300 transition-colors disabled:opacity-20"
-                        >
-                          <Send size={22} />
-                        </button>
-                      </div>
+                        <span className="text-[10px] opacity-60 tracking-widest">
+                          {MOOD_COLORS.find(m => m.color === selectedMood)?.name || '记录心情'}
+                        </span>
+                      </button>
                     </div>
-                  )}
+                    <button 
+                      onClick={() => setIsChatting(true)}
+                      className="p-2 glass rounded-full opacity-60 hover:opacity-100 transition-opacity"
+                    >
+                      <MessageSquare size={18} />
+                    </button>
+                  </div>
+                  <textarea
+                    value={diaryContent}
+                    onChange={(e) => {
+                      setDiaryContent(e.target.value);
+                      saveDiary(e.target.value);
+                    }}
+                    placeholder="此刻，你想记录下什么？"
+                    className="flex-1 bg-transparent border-none focus:ring-0 outline-none px-2 text-lg font-light leading-relaxed placeholder:opacity-20 resize-none custom-scrollbar min-h-[200px]"
+                    spellCheck={false}
+                  />
                 </div>
               </motion.div>
             )}
@@ -1117,11 +1057,91 @@ export default function App() {
               </main>
 
               {/* Navigation */}
-              <nav className="p-6 flex justify-around border-t border-white/10 shrink-0">
-                <NavButton active={activeTab === 'list'} onClick={() => { playSound('click'); setActiveTab('list'); }} icon={<List size={20} />} />
-                <NavButton active={activeTab === 'calendar'} onClick={() => { playSound('click'); setActiveTab('calendar'); }} icon={<CalendarIcon size={20} />} />
-                <NavButton active={activeTab === 'diary'} onClick={() => { playSound('click'); setActiveTab('diary'); }} icon={<BookOpen size={20} />} />
-              </nav>
+              {!isChatting && (
+                <nav className="px-8 pt-2 pb-10 flex justify-around border-t border-white/10 shrink-0">
+                  <NavButton active={activeTab === 'list'} onClick={() => { playSound('click'); setActiveTab('list'); }} icon={<List size={20} />} />
+                  <NavButton active={activeTab === 'calendar'} onClick={() => { playSound('click'); setActiveTab('calendar'); }} icon={<CalendarIcon size={20} />} />
+                  <NavButton active={activeTab === 'diary'} onClick={() => { playSound('click'); setActiveTab('diary'); }} icon={<BookOpen size={20} />} />
+                </nav>
+              )}
+
+              {/* Full Screen Chat Overlay */}
+              <AnimatePresence>
+                {isChatting && (
+                  <motion.div
+                    initial={{ opacity: 1 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 1 }}
+                    transition={{ duration: 0 }}
+                    className={cn(
+                      "fixed inset-0 z-[80] flex flex-col p-8 md:p-12 transition-colors duration-0",
+                      isNight ? "bg-[#020617]" : "bg-[#f8fafc]"
+                    )}
+                  >
+                    <div className="flex justify-between items-center mb-12">
+                      <div className="flex flex-col">
+                        <p className="text-[10px] uppercase tracking-[0.5em] opacity-40 font-bold mb-2">星空对话</p>
+                        <h2 className="text-2xl font-serif italic text-white/90">{format(selectedDate, 'MMMM do')}</h2>
+                      </div>
+                      <button 
+                        onClick={() => setIsChatting(false)}
+                        className="p-4 glass rounded-full opacity-60 hover:opacity-100 transition-all hover:scale-110 active:scale-95"
+                      >
+                        <ChevronLeft size={24} />
+                      </button>
+                    </div>
+                    
+                    <div className="flex-1 overflow-y-auto space-y-6 mb-8 custom-scrollbar pr-4">
+                      {currentDiary.chatHistory.length === 0 && (
+                        <div className="h-full flex flex-col items-center justify-center opacity-20 text-center px-12 space-y-4">
+                          <MessageSquare size={48} strokeWidth={1} />
+                          <p className="text-lg italic font-light tracking-widest">“在这里，你可以和我聊聊今天的感悟。”</p>
+                        </div>
+                      )}
+                      {currentDiary.chatHistory.map((msg, i) => (
+                        <div 
+                          key={i} 
+                          className={cn(
+                            "max-w-[85%] md:max-w-[70%] p-6 rounded-[2.5rem] text-base leading-relaxed shadow-2xl",
+                            msg.role === 'user' 
+                              ? "ml-auto bg-blue-500/10 text-blue-100 rounded-tr-none border border-blue-500/10" 
+                              : "mr-auto glass text-white/90 rounded-tl-none border border-white/5"
+                          )}
+                        >
+                          {msg.text}
+                        </div>
+                      ))}
+                      {isAiLoading && (
+                        <div className="mr-auto glass p-6 rounded-[2.5rem] rounded-tl-none flex gap-2 border border-white/5">
+                          <motion.div animate={{ opacity: [0.2, 1, 0.2] }} transition={{ repeat: Infinity, duration: 1 }} className="w-1.5 h-1.5 bg-white rounded-full" />
+                          <motion.div animate={{ opacity: [0.2, 1, 0.2] }} transition={{ repeat: Infinity, duration: 1, delay: 0.2 }} className="w-1.5 h-1.5 bg-white rounded-full" />
+                          <motion.div animate={{ opacity: [0.2, 1, 0.2] }} transition={{ repeat: Infinity, duration: 1, delay: 0.4 }} className="w-1.5 h-1.5 bg-white rounded-full" />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="relative max-w-4xl mx-auto w-full">
+                      <div className="absolute inset-0 bg-blue-500/5 blur-3xl rounded-full -z-10" />
+                      <input
+                        type="text"
+                        autoFocus
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleAiChat()}
+                        placeholder="向星空提问..."
+                        className="w-full bg-white/5 border border-white/10 rounded-[2rem] py-6 pl-8 pr-20 text-lg font-light focus:ring-2 focus:ring-blue-500/30 outline-none backdrop-blur-xl transition-all placeholder:opacity-20"
+                      />
+                      <button 
+                        onClick={handleAiChat}
+                        disabled={isAiLoading}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-4 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition-all shadow-lg shadow-blue-500/20 disabled:opacity-20 active:scale-95"
+                      >
+                        <Send size={24} />
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </>
           )}
 
