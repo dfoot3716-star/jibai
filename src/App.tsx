@@ -250,6 +250,7 @@ export default function App() {
   const [chatInput, setChatInput] = useState('');
   const [isChatting, setIsChatting] = useState(false);
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
   
   // Mood State
   const [selectedMood, setSelectedMood] = useState<string>(MOOD_COLORS[0].color);
@@ -347,10 +348,18 @@ export default function App() {
   }, [user]);
 
   const login = async () => {
+    setLoginError(null);
     try {
       await signInWithPopup(auth, googleProvider);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Login Error:", error);
+      if (error.code === 'auth/popup-blocked') {
+        setLoginError("登录窗口被浏览器拦截，请允许弹出窗口。");
+      } else if (error.code === 'auth/popup-closed-by-user') {
+        // User closed the popup, no need to show error
+      } else {
+        setLoginError("登录失败，请稍后重试。");
+      }
     }
   };
 
@@ -706,15 +715,6 @@ export default function App() {
             </div>
           ) : !user ? (
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-8">
-              <motion.div 
-                initial={{ scale: 0.8, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                className="w-24 h-24 rounded-full glass flex items-center justify-center relative"
-              >
-                <div className="absolute inset-0 rounded-full bg-blue-500/10 animate-ping" />
-                <LogIn size={40} className="text-blue-400 relative z-10" />
-              </motion.div>
-              
               <div className="space-y-3">
                 <h2 className="text-4xl font-serif italic tracking-tight">既白</h2>
                 <p className="text-xs opacity-40 tracking-[0.4em] uppercase font-medium">记录每一个晨曦与星空</p>
@@ -730,6 +730,16 @@ export default function App() {
               >
                 使用 Google 登录
               </button>
+
+              {loginError && (
+                <motion.p 
+                  initial={{ opacity: 0, y: 5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="text-xs text-red-400/80 font-light"
+                >
+                  {loginError}
+                </motion.p>
+              )}
             </div>
           ) : (
             <>
