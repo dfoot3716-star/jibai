@@ -1,0 +1,67 @@
+{
+  "entities": {
+    "Task": {
+      "title": "Task",
+      "description": "A user's task or plan",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "priority": { "type": "string", "enum": ["IMPORTANT_URGENT", "IMPORTANT_NOT_URGENT", "URGENT_NOT_IMPORTANT", "CASUAL"] },
+        "completed": { "type": "boolean" },
+        "createdAt": { "type": "number" },
+        "uid": { "type": "string", "description": "Owner's user ID" }
+      },
+      "required": ["id", "text", "priority", "completed", "createdAt", "uid"]
+    },
+    "DiaryEntry": {
+      "title": "DiaryEntry",
+      "description": "A user's diary entry with AI chat history",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "content": { "type": "string" },
+        "moodColor": { "type": "string", "description": "Hex color representing the mood" },
+        "chatHistory": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": { "type": "string", "enum": ["user", "model"] },
+              "text": { "type": "string" }
+            }
+          }
+        },
+        "uid": { "type": "string", "description": "Owner's user ID" }
+      },
+      "required": ["id", "date", "content", "chatHistory", "uid"]
+    },
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string", "description": "Base64 or URL of user avatar" },
+        "email": { "type": "string" }
+      },
+      "required": ["uid"]
+    }
+  },
+  "firestore": {
+    "/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "User tasks collection"
+    },
+    "/diaries/{diaryId}": {
+      "schema": "DiaryEntry",
+      "description": "User diaries collection"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles collection"
+    }
+  }
+}

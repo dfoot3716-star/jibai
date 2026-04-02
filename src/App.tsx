@@ -11,15 +11,18 @@ import {
   Calendar as CalendarIcon, 
   Users, 
   List, 
-  Moon, 
-  Sun,
   ChevronLeft,
   ChevronRight,
   Settings,
   Star,
   BookOpen,
   Send,
-  MessageSquare
+  MessageSquare,
+  LogOut,
+  LogIn,
+  Sparkles,
+  Palette,
+  Camera
 } from 'lucide-react';
 import { 
   format, 
@@ -35,6 +38,26 @@ import {
 } from 'date-fns';
 import { GoogleGenAI } from "@google/genai";
 import { cn } from './lib/utils';
+import { 
+  auth, 
+  db, 
+  googleProvider, 
+  signInWithPopup, 
+  signOut, 
+  onAuthStateChanged
+} from './lib/firebase';
+import { 
+  collection, 
+  query, 
+  where, 
+  onSnapshot, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  doc, 
+  setDoc,
+  getDocFromServer
+} from 'firebase/firestore';
 
 // --- Types ---
 
@@ -57,6 +80,7 @@ interface DiaryEntry {
   id: string;
   date: string; // YYYY-MM-DD
   content: string;
+  moodColor?: string;
   chatHistory: { role: 'user' | 'model'; text: string }[];
 }
 
@@ -73,6 +97,14 @@ const PRIORITY_CONFIG = {
   [Priority.URGENT_NOT_IMPORTANT]: { label: '紧急不重要', color: 'bg-blue-300', dot: 'w-3 h-3 rounded-full opacity-50' },
   [Priority.CASUAL]: { label: '随心', color: 'bg-blue-100', dot: 'w-3 h-3 rounded-full opacity-30' },
 };
+
+const MOOD_COLORS = [
+  { name: '开心', color: '#FFE5B3', description: '明媚的心情' },
+  { name: '忧郁', color: '#D1B3FF', description: '静静的思考' },
+  { name: '平静', color: '#B3E5FF', description: '如星空安稳' },
+  { name: '生气', color: '#FFB3B3', description: '有些不愉快' },
+  { name: '轻松', color: '#B3FFD9', description: '自在的呼吸' },
+];
 
 // --- Hooks ---
 
@@ -191,9 +223,11 @@ const Background = ({ time }: { time: Date }) => {
 
 
 export default function App() {
-  const [tasks, setTasks] = useLocalStorage<Task[]>('jibai-tasks', []);
-  const [diaries, setDiaries] = useLocalStorage<DiaryEntry[]>('jibai-diaries', []);
-  const [activeTab, setActiveTab] = useState<'list' | 'calendar' | 'music' | 'diary'>('list');
+  const [user, setUser] = useState<any>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [diaries, setDiaries] = useState<DiaryEntry[]>([]);
+  const [activeTab, setActiveTab] = useState<'list' | 'calendar' | 'diary'>('list');
   const [currentTime, setCurrentTime] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(startOfDay(new Date()));
   const [showAddModal, setShowAddModal] = useState(false);
@@ -208,38 +242,150 @@ export default function App() {
   const [isChatting, setIsChatting] = useState(false);
   const [isAiLoading, setIsAiLoading] = useState(false);
   
-  // Timer State
-  const [timerSeconds, setTimerSeconds] = useState(25 * 60);
-  const [isTimerRunning, setIsTimerRunning] = useState(false);
+  // Mood State
+  const [selectedMood, setSelectedMood] = useState<string>(MOOD_COLORS[0].color);
+  const [showMoodModal, setShowMoodModal] = useState(false);
+  
+  // AI Insights State
+  const [isInsightLoading, setIsInsightLoading] = useState(false);
+  const [weeklyInsight, setWeeklyInsight] = useState<string | null>(null);
+  const [showInsightModal, setShowInsightModal] = useState(false);
 
+  // Profile State
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [isAvatarLoading, setIsAvatarLoading] = useState(false);
+  const [userProfile, setUserProfile] = useState<{ photoURL?: string } | null>(null);
+
+  // Local Storage for Migration
+  const [localTasks] = useLocalStorage<Task[]>('tasks', []);
+  const [localDiaries] = useLocalStorage<DiaryEntry[]>('diaries', []);
+  const [hasMigrated, setHasMigrated] = useLocalStorage<boolean>('has_migrated', false);
+
+  // Auth Listener
   useEffect(() => {
-    let interval: any;
-    if (isTimerRunning && timerSeconds > 0) {
-      interval = setInterval(() => {
-        setTimerSeconds(s => s - 1);
-      }, 1000);
-    } else if (timerSeconds === 0) {
-      setIsTimerRunning(false);
-      playSound('complete');
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setIsAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Data Migration Logic
+  useEffect(() => {
+    const migrate = async () => {
+      if (user && !hasMigrated) {
+        console.log("Starting data migration...");
+        try {
+          // Migrate Tasks
+          for (const task of localTasks) {
+            const taskRef = doc(db, 'tasks', task.id);
+            await setDoc(taskRef, { ...task, uid: user.uid });
+          }
+          // Migrate Diaries
+          for (const diary of localDiaries) {
+            const diaryRef = doc(db, 'diaries', diary.id);
+            await setDoc(diaryRef, { ...diary, uid: user.uid });
+          }
+          setHasMigrated(true);
+          console.log("Migration complete!");
+        } catch (error) {
+          console.error("Migration failed:", error);
+        }
+      }
+    };
+    migrate();
+  }, [user, hasMigrated, localTasks, localDiaries]);
+
+  // Firestore Sync
+  useEffect(() => {
+    if (!user) {
+      setTasks([]);
+      setDiaries([]);
+      setUserProfile(null);
+      return;
     }
-    return () => clearInterval(interval);
-  }, [isTimerRunning, timerSeconds]);
 
-  const toggleTimer = () => {
-    playSound('click');
-    setIsTimerRunning(!isTimerRunning);
+    const userRef = doc(db, 'users', user.uid);
+    const unsubscribeUser = onSnapshot(userRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setUserProfile(snapshot.data());
+      }
+    }, (error) => {
+      console.error("Firestore User Profile Error:", error);
+    });
+
+    const tasksQuery = query(collection(db, 'tasks'), where('uid', '==', user.uid));
+    const unsubscribeTasks = onSnapshot(tasksQuery, (snapshot) => {
+      const t = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Task));
+      setTasks(t);
+    }, (error) => {
+      console.error("Firestore Tasks Error:", error);
+    });
+
+    const diariesQuery = query(collection(db, 'diaries'), where('uid', '==', user.uid));
+    const unsubscribeDiaries = onSnapshot(diariesQuery, (snapshot) => {
+      const d = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as DiaryEntry));
+      setDiaries(d);
+    }, (error) => {
+      console.error("Firestore Diaries Error:", error);
+    });
+
+    return () => {
+      unsubscribeUser();
+      unsubscribeTasks();
+      unsubscribeDiaries();
+    };
+  }, [user]);
+
+  const login = async () => {
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (error) {
+      console.error("Login Error:", error);
+    }
   };
 
-  const resetTimer = () => {
-    playSound('click');
-    setIsTimerRunning(false);
-    setTimerSeconds(25 * 60);
+  const logout = async () => {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error("Logout Error:", error);
+    }
   };
 
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s.toString().padStart(2, '0')}`;
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    // Check file size (limit to 1MB for base64 safety)
+    if (file.size > 1024 * 1024) {
+      alert("图片太大啦，请选择 1MB 以内的图片。");
+      return;
+    }
+
+    setIsAvatarLoading(true);
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64String = reader.result as string;
+      try {
+        const userRef = doc(db, 'users', user.uid);
+        await setDoc(userRef, { 
+          uid: user.uid,
+          photoURL: base64String,
+          displayName: user.displayName,
+          email: user.email,
+          updatedAt: Date.now()
+        }, { merge: true });
+        
+        playSound('complete');
+      } catch (error) {
+        console.error("Avatar Update Error:", error);
+        alert("更换头像失败，请重试。");
+      } finally {
+        setIsAvatarLoading(false);
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   useEffect(() => {
@@ -252,34 +398,88 @@ export default function App() {
     };
   }, []);
 
-  const addTask = () => {
-    if (!newTaskText.trim()) return;
-    const newTask: Task = {
-      id: crypto.randomUUID(),
+  const generateWeeklyInsight = async () => {
+    if (!user) return;
+    setIsInsightLoading(true);
+    setShowInsightModal(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+      const model = "gemini-3-flash-preview";
+      
+      const recentTasks = tasks.slice(-20).map(t => `${t.text} (${t.completed ? '已完成' : '未完成'})`).join('\n');
+      const recentDiaries = diaries.slice(-5).map(d => d.content).join('\n\n');
+      
+      const prompt = `你是一个温柔、富有诗意的生活观察者。请根据我最近的计划和日记，为我生成一份本周的“星空周报”。
+      
+      最近的计划：
+      ${recentTasks}
+      
+      最近的日记：
+      ${recentDiaries}
+      
+      请包含：
+      1. 一个富有诗意的总结标题。
+      2. 对我本周努力的肯定。
+      3. 一个关于下周的小建议，字数控制在200字以内。
+      请使用中文，语气要像老朋友一样温暖。`;
+
+      const response = await ai.models.generateContent({
+        model,
+        contents: prompt,
+      });
+      setWeeklyInsight(response.text || "星空有些模糊，请稍后再试。");
+    } catch (error) {
+      console.error("Insight Error:", error);
+      setWeeklyInsight("连接星空失败，请检查网络。");
+    } finally {
+      setIsInsightLoading(false);
+    }
+  };
+
+  const addTask = async () => {
+    if (!newTaskText.trim() || !user) return;
+    const newTask = {
       text: newTaskText,
       priority: newTaskPriority,
       completed: false,
       createdAt: startOfDay(selectedDate).getTime() + (Date.now() % (24 * 60 * 60 * 1000)),
+      uid: user.uid,
+      id: crypto.randomUUID() // We'll use this as doc ID or field
     };
-    setTasks([...tasks, newTask]);
-    setNewTaskText('');
-    setShowAddModal(false);
-    playSound('add');
+    try {
+      await setDoc(doc(db, 'tasks', newTask.id), newTask);
+      setNewTaskText('');
+      setShowAddModal(false);
+      playSound('add');
+    } catch (error) {
+      console.error("Add Task Error:", error);
+    }
   };
 
-  const toggleTask = (id: string) => {
+  const toggleTask = async (id: string) => {
     const task = tasks.find(t => t.id === id);
-    if (task && !task.completed) {
+    if (!task) return;
+    
+    if (!task.completed) {
       playSound('complete');
     } else {
       playSound('click');
     }
-    setTasks(tasks.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
+    
+    try {
+      await updateDoc(doc(db, 'tasks', id), { completed: !task.completed });
+    } catch (error) {
+      console.error("Toggle Task Error:", error);
+    }
   };
 
-  const deleteTask = (id: string) => {
+  const deleteTask = async (id: string) => {
     playSound('click');
-    setTasks(tasks.filter(t => t.id !== id));
+    try {
+      await deleteDoc(doc(db, 'tasks', id));
+    } catch (error) {
+      console.error("Delete Task Error:", error);
+    }
   };
 
   const filteredTasks = useMemo(() => {
@@ -312,39 +512,54 @@ export default function App() {
 
   useEffect(() => {
     setDiaryContent(currentDiary.content);
+    setSelectedMood(currentDiary.moodColor || MOOD_COLORS[0].color);
   }, [currentDiary]);
 
-  const saveDiary = (content: string) => {
+  const saveDiary = async (content: string, mood?: string) => {
+    if (!user) return;
     const dateKey = format(selectedDate, 'yyyy-MM-dd');
     const existing = diaries.find(d => d.date === dateKey);
-    if (existing) {
-      setDiaries(diaries.map(d => d.date === dateKey ? { ...d, content } : d));
-    } else {
-      setDiaries([...diaries, { id: crypto.randomUUID(), date: dateKey, content, chatHistory: [] }]);
+    const moodToSave = mood || selectedMood;
+    
+    try {
+      if (existing) {
+        await updateDoc(doc(db, 'diaries', existing.id), { content, moodColor: moodToSave });
+      } else {
+        const newDiary = {
+          id: crypto.randomUUID(),
+          date: dateKey,
+          content,
+          moodColor: moodToSave,
+          chatHistory: [],
+          uid: user.uid
+        };
+        await setDoc(doc(db, 'diaries', newDiary.id), newDiary);
+      }
+    } catch (error) {
+      console.error("Save Diary Error:", error);
     }
   };
 
   const handleAiChat = async () => {
-    if (!chatInput.trim() || isAiLoading) return;
+    if (!chatInput.trim() || isAiLoading || !user) return;
     
     const userMsg = chatInput;
     setChatInput('');
     setIsAiLoading(true);
     
     const dateKey = format(selectedDate, 'yyyy-MM-dd');
-    const entry = diaries.find(d => d.date === dateKey) || { id: crypto.randomUUID(), date: dateKey, content: diaryContent, chatHistory: [] };
+    const entry = diaries.find(d => d.date === dateKey) || { id: crypto.randomUUID(), date: dateKey, content: diaryContent, chatHistory: [], uid: user.uid };
     
     const newHistory = [...entry.chatHistory, { role: 'user' as const, text: userMsg }];
     
-    // Update local state immediately for UI
-    const updatedEntry = { ...entry, chatHistory: newHistory };
-    if (diaries.find(d => d.date === dateKey)) {
-      setDiaries(diaries.map(d => d.date === dateKey ? updatedEntry : d));
-    } else {
-      setDiaries([...diaries, updatedEntry]);
-    }
-
     try {
+      // Save user message first
+      if (diaries.find(d => d.date === dateKey)) {
+        await updateDoc(doc(db, 'diaries', entry.id), { chatHistory: newHistory });
+      } else {
+        await setDoc(doc(db, 'diaries', entry.id), { ...entry, chatHistory: newHistory });
+      }
+
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
       const model = ai.models.generateContent({
         model: "gemini-3-flash-preview",
@@ -358,11 +573,13 @@ export default function App() {
       const aiText = response.text || "抱歉，我现在无法回应。";
       
       const finalHistory = [...newHistory, { role: 'model' as const, text: aiText }];
-      setDiaries(prev => prev.map(d => d.date === dateKey ? { ...d, chatHistory: finalHistory } : d));
+      await updateDoc(doc(db, 'diaries', entry.id), { chatHistory: finalHistory });
     } catch (error) {
       console.error("AI Chat Error:", error);
       const errorMsg = { role: 'model' as const, text: "连接星空失败，请稍后再试。" };
-      setDiaries(prev => prev.map(d => d.date === dateKey ? { ...d, chatHistory: [...newHistory, errorMsg] } : d));
+      if (entry.id) {
+        await updateDoc(doc(db, 'diaries', entry.id), { chatHistory: [...newHistory, errorMsg] });
+      }
     } finally {
       setIsAiLoading(false);
     }
@@ -376,13 +593,13 @@ export default function App() {
     <div className={cn("h-screen flex flex-col items-center justify-center p-4 md:p-8 overflow-hidden transition-colors duration-1000", isNight ? "text-white" : "text-slate-900")}>
       <Background time={currentTime} />
 
-      <AnimatePresence>
+      <AnimatePresence mode="wait">
         {showIntro && (
           <motion.div
             key="intro"
             initial={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 2, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 1.5, ease: [0.22, 1, 0.36, 1] }}
             className={cn(
               "fixed inset-0 z-[100] flex flex-col items-center justify-center overflow-hidden transition-colors duration-1000",
               isNight 
@@ -394,7 +611,7 @@ export default function App() {
             <motion.div
               initial={{ opacity: 0, scale: 0.8, y: 100 }}
               animate={{ opacity: [0, 0.2, 0.1], scale: [0.8, 1.2, 1.1], y: [100, 0, -20] }}
-              transition={{ duration: 4, ease: "easeOut" }}
+              transition={{ duration: 2.5, ease: "easeOut" }}
               className={cn(
                 "absolute w-[150%] aspect-square rounded-full blur-[120px] -bottom-1/2",
                 isNight ? "bg-gradient-to-t from-blue-400/20 via-transparent to-transparent" : "bg-gradient-to-t from-white/40 via-transparent to-transparent"
@@ -405,7 +622,7 @@ export default function App() {
               <motion.div
                 initial={{ opacity: 0, letterSpacing: "1em", filter: "blur(10px)" }}
                 animate={{ opacity: 1, letterSpacing: "0.5em", filter: "blur(0px)" }}
-                transition={{ duration: 2.5, ease: [0.22, 1, 0.36, 1] }}
+                transition={{ duration: 2, ease: [0.22, 1, 0.36, 1] }}
                 className="flex items-center"
               >
                 <h1 className={cn(
@@ -419,14 +636,14 @@ export default function App() {
               <motion.div
                 initial={{ width: 0, opacity: 0 }}
                 animate={{ width: "40px", opacity: 0.3 }}
-                transition={{ delay: 1.5, duration: 1.5, ease: "easeInOut" }}
+                transition={{ delay: 0.8, duration: 1.2, ease: "easeInOut" }}
                 className="h-px bg-current mt-12"
               />
 
               <motion.p
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 0.4, y: 0 }}
-                transition={{ delay: 2, duration: 1.5 }}
+                transition={{ delay: 1.2, duration: 1 }}
                 className="text-[9px] tracking-[0.6em] uppercase font-medium mt-8"
               >
                 FIRST LIGHT OF DAWN
@@ -458,11 +675,13 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <motion.div 
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        className="w-full max-w-2xl flex flex-col h-full relative"
-      >
+      {!showIntro && (
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 1.2 }}
+          className="w-full max-w-2xl flex flex-col h-full relative"
+        >
         {/* Header */}
         <header className="p-8 pb-4 flex justify-between items-end shrink-0">
           <div className="flex items-center gap-4">
@@ -481,11 +700,62 @@ export default function App() {
               </p>
             </div>
           </div>
+          
+          <div className="flex items-center gap-4">
+            {user ? (
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={generateWeeklyInsight}
+                  className="p-2 glass rounded-full text-blue-400 hover:text-blue-300 transition-colors"
+                  title="星空周报"
+                >
+                  <Sparkles size={18} />
+                </button>
+                <button 
+                  onClick={() => { playSound('click'); setShowProfileModal(true); }}
+                  className="relative group transition-transform active:scale-95"
+                >
+                  <img 
+                    src={userProfile?.photoURL || user.photoURL || `https://ui-avatars.com/api/?name=${userProfile?.displayName || user.displayName || 'User'}`} 
+                    alt="Avatar" 
+                    className="w-8 h-8 rounded-full border border-white/20 group-hover:border-blue-400/50 transition-colors object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="absolute inset-0 rounded-full bg-blue-400/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              </div>
+            ) : (
+              <button 
+                onClick={login}
+                className="flex items-center gap-2 px-4 py-2 glass rounded-full text-xs tracking-widest uppercase font-medium hover:bg-white/10 transition-all"
+              >
+                <LogIn size={14} />
+                <span>登录</span>
+              </button>
+            )}
+          </div>
         </header>
 
         {/* Content */}
         <main className="flex-1 overflow-y-auto px-8 py-4 custom-scrollbar">
-          <AnimatePresence mode="wait">
+          {!user && isAuthReady ? (
+            <div className="h-full flex flex-col items-center justify-center text-center space-y-8">
+              <div className="w-20 h-20 rounded-full glass flex items-center justify-center">
+                <Star size={40} className="text-blue-400 opacity-60" />
+              </div>
+              <div className="space-y-2">
+                <h2 className="text-2xl font-serif italic">欢迎来到既白</h2>
+                <p className="text-sm opacity-40 max-w-xs">请登录以同步您的日记与计划，开启您的私人星空之旅。</p>
+              </div>
+              <button 
+                onClick={login}
+                className="px-12 py-4 bg-blue-500 text-white rounded-full text-sm tracking-[0.2em] font-medium shadow-2xl shadow-blue-500/30 hover:bg-blue-600 transition-all active:scale-95"
+              >
+                使用 Google 登录
+              </button>
+            </div>
+          ) : (
+            <AnimatePresence mode="wait">
             {activeTab === 'list' && (
               <motion.div
                 key="list"
@@ -614,11 +884,28 @@ export default function App() {
                 exit={{ opacity: 0, y: -10 }}
                 className="h-full flex flex-col space-y-6"
               >
-                <div className="flex-1 flex flex-col glass rounded-[2.5rem] p-8 overflow-hidden relative">
+                <div className="flex-1 flex flex-col bg-white/5 backdrop-blur-sm rounded-[2.5rem] p-8 overflow-hidden relative">
                   {!isChatting ? (
                     <>
                       <div className="flex justify-between items-center mb-6">
-                        <p className="text-[10px] uppercase tracking-[0.3em] opacity-40 font-bold">每日心语</p>
+                        <div className="flex items-center gap-4">
+                          <p className="text-[10px] uppercase tracking-[0.3em] opacity-40 font-bold">每日心语</p>
+                          <button 
+                            onClick={() => setShowMoodModal(true)}
+                            className="flex items-center gap-2 px-3 py-1 glass rounded-full hover:bg-white/5 transition-colors"
+                          >
+                            <div 
+                              className="w-2 h-2 rounded-full" 
+                              style={{ 
+                                backgroundColor: selectedMood,
+                                boxShadow: `0 0 8px ${selectedMood}80`
+                              }} 
+                            />
+                            <span className="text-[10px] opacity-60 tracking-widest">
+                              {MOOD_COLORS.find(m => m.color === selectedMood)?.name || '记录心情'}
+                            </span>
+                          </button>
+                        </div>
                         <button 
                           onClick={() => setIsChatting(true)}
                           className="p-2 glass rounded-full opacity-60 hover:opacity-100 transition-opacity"
@@ -633,7 +920,7 @@ export default function App() {
                           saveDiary(e.target.value);
                         }}
                         placeholder="此刻，你想记录下什么？"
-                        className="flex-1 bg-transparent border-none focus:ring-0 p-0 text-lg font-light leading-relaxed placeholder:opacity-20 resize-none custom-scrollbar min-h-[200px]"
+                        className="flex-1 bg-transparent border-none focus:ring-0 outline-none p-0 text-lg font-light leading-relaxed placeholder:opacity-20 resize-none custom-scrollbar min-h-[200px]"
                         spellCheck={false}
                       />
                     </>
@@ -696,58 +983,8 @@ export default function App() {
                 </div>
               </motion.div>
             )}
-
-            {activeTab === 'music' && (
-              <motion.div
-                key="music"
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                className="flex flex-col items-center justify-center h-full text-center"
-              >
-                {/* Timer Section */}
-                <div className="space-y-12">
-                  <div className="relative inline-block">
-                    <svg className="w-64 h-64 -rotate-90">
-                      <circle 
-                        cx="128" cy="128" r="118" 
-                        className="stroke-white/10 fill-none" 
-                        strokeWidth="1.5" 
-                      />
-                      <motion.circle 
-                        cx="128" cy="128" r="118" 
-                        className="stroke-blue-500 fill-none" 
-                        strokeWidth="3" 
-                        strokeLinecap="round"
-                        initial={{ pathLength: 1 }}
-                        animate={{ pathLength: timerSeconds / (25 * 60) }}
-                        transition={{ duration: 1, ease: "linear" }}
-                      />
-                    </svg>
-                    <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      <span className="text-7xl font-light tracking-tighter">{formatTime(timerSeconds)}</span>
-                      <p className="text-[10px] uppercase tracking-[0.3em] opacity-40 mt-4">专注时刻</p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex justify-center gap-6">
-                    <button 
-                      onClick={toggleTimer}
-                      className="px-12 py-4 glass rounded-full text-sm tracking-widest uppercase font-medium hover:bg-white/10 transition-all active:scale-95"
-                    >
-                      {isTimerRunning ? "暂停" : "开始"}
-                    </button>
-                    <button 
-                      onClick={resetTimer}
-                      className="px-12 py-4 glass rounded-full text-sm tracking-widest uppercase font-medium hover:bg-white/10 transition-all active:scale-95"
-                    >
-                      重置
-                    </button>
-                  </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+            </AnimatePresence>
+          )}
         </main>
 
         {/* Navigation */}
@@ -755,7 +992,6 @@ export default function App() {
           <NavButton active={activeTab === 'list'} onClick={() => { playSound('click'); setActiveTab('list'); }} icon={<List size={20} />} />
           <NavButton active={activeTab === 'calendar'} onClick={() => { playSound('click'); setActiveTab('calendar'); }} icon={<CalendarIcon size={20} />} />
           <NavButton active={activeTab === 'diary'} onClick={() => { playSound('click'); setActiveTab('diary'); }} icon={<BookOpen size={20} />} />
-          <NavButton active={activeTab === 'music'} onClick={() => { playSound('click'); setActiveTab('music'); }} icon={<Moon size={20} />} />
         </nav>
 
         {/* Add Modal */}
@@ -766,18 +1002,25 @@ export default function App() {
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 1.05 }}
               className={cn(
-              "fixed inset-0 z-[60] glass backdrop-blur-2xl flex flex-col p-6 md:p-10 overflow-y-auto",
+              "fixed inset-0 z-[60] glass backdrop-blur-2xl flex flex-col p-6 md:p-10 overflow-y-auto transition-colors duration-500",
+              isNight ? "bg-black/40" : "bg-white/40",
               "pb-[safe-area-inset-bottom]"
             )}
             >
               <div className="flex justify-between items-center mb-16">
-                <h2 className="text-3xl font-serif italic">新计划</h2>
+                <h2 className={cn(
+                  "text-3xl font-serif italic transition-colors duration-500",
+                  isNight ? "text-white" : "text-slate-900"
+                )}>新计划</h2>
                 <button 
                   onClick={() => {
                     playSound('click');
                     setShowAddModal(false);
                   }} 
-                  className="p-2 opacity-40 hover:opacity-100 transition-opacity"
+                  className={cn(
+                    "p-2 transition-all duration-500",
+                    isNight ? "text-white opacity-40 hover:opacity-100" : "text-slate-900 opacity-40 hover:opacity-100"
+                  )}
                 >
                   <ChevronLeft size={28} />
                 </button>
@@ -790,12 +1033,20 @@ export default function App() {
                   value={newTaskText}
                   onChange={(e) => setNewTaskText(e.target.value)}
                   placeholder="在此输入你的计划..."
-                  className="bg-transparent border-none text-3xl font-light focus:ring-0 placeholder:opacity-20 w-full p-0"
+                  className={cn(
+                    "bg-transparent text-2xl md:text-3xl font-light focus:ring-0 focus:outline-none w-full px-6 py-4 rounded-2xl border transition-all duration-500",
+                    isNight 
+                      ? "border-white/20 text-white placeholder:text-white/20" 
+                      : "border-slate-900/20 text-slate-900 placeholder:text-slate-900/20"
+                  )}
                   onKeyDown={(e) => e.key === 'Enter' && addTask()}
                 />
 
                 <div className="space-y-4">
-                  <p className="text-[10px] opacity-30 uppercase tracking-[0.3em] font-bold">优先级</p>
+                  <p className={cn(
+                    "text-[10px] uppercase tracking-[0.3em] font-bold transition-opacity duration-500",
+                    isNight ? "text-white opacity-30" : "text-slate-900 opacity-30"
+                  )}>优先级</p>
                   <div className="grid grid-cols-2 gap-3 md:gap-4">
                     {Object.entries(PRIORITY_CONFIG).map(([key, config]) => (
                       <button
@@ -808,7 +1059,9 @@ export default function App() {
                           "flex items-center gap-2 md:gap-4 p-3 md:p-5 rounded-2xl md:rounded-3xl border transition-all duration-300",
                           newTaskPriority === key 
                             ? "bg-blue-500 text-white border-blue-500 shadow-xl shadow-blue-500/20 scale-[1.02]" 
-                            : "bg-white/5 border-white/10 opacity-40 hover:opacity-100"
+                            : isNight 
+                              ? "bg-white/5 border-white/10 text-white opacity-40 hover:opacity-100"
+                              : "bg-black/5 border-black/10 text-slate-900 opacity-40 hover:opacity-100"
                         )}
                       >
                         <div className={cn(config.dot, "shrink-0", newTaskPriority === key ? "bg-white" : config.color)} />
@@ -830,7 +1083,232 @@ export default function App() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Profile Modal */}
+        <AnimatePresence>
+          {showProfileModal && user && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[100] glass backdrop-blur-3xl flex items-center justify-center p-6"
+            >
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className="max-w-sm w-full glass rounded-[3rem] p-10 relative overflow-hidden"
+              >
+                <div className="flex justify-between items-center mb-10">
+                  <h2 className="text-2xl font-serif italic">个人中心</h2>
+                  <button 
+                    onClick={() => setShowProfileModal(false)}
+                    className="p-2 opacity-40 hover:opacity-100 transition-opacity"
+                  >
+                    <Plus size={24} className="rotate-45" />
+                  </button>
+                </div>
+
+                <div className="flex flex-col items-center text-center space-y-6">
+                  <div className="relative group cursor-pointer" onClick={() => document.getElementById('avatar-upload')?.click()}>
+                    <div className={cn(
+                      "relative w-24 h-24 rounded-full border-2 border-white/10 p-1 transition-all group-hover:border-blue-400/50",
+                      isAvatarLoading && "opacity-50"
+                    )}>
+                      <img 
+                        src={userProfile?.photoURL || user.photoURL || `https://ui-avatars.com/api/?name=${userProfile?.displayName || user.displayName || 'User'}`} 
+                        alt="Avatar" 
+                        className="w-full h-full rounded-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                      {isAvatarLoading ? (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                        </div>
+                      ) : (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Camera size={24} className="text-white" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center border-2 border-[#1e1e1e]">
+                      <Star size={12} className="text-white" />
+                    </div>
+                    <input 
+                      type="file" 
+                      id="avatar-upload" 
+                      className="hidden" 
+                      accept="image/*" 
+                      onChange={handleAvatarChange}
+                      disabled={isAvatarLoading}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <h3 className="text-xl font-medium">{userProfile?.displayName || user.displayName || '星空旅者'}</h3>
+                    <p className="text-xs opacity-40 font-mono tracking-wider">{user.email}</p>
+                  </div>
+
+                  <div className="w-full grid grid-cols-2 gap-4 pt-4">
+                    <div className="glass rounded-2xl p-4 flex flex-col items-center gap-1">
+                      <span className="text-lg font-serif italic">{tasks.length}</span>
+                      <span className="text-[10px] opacity-40 uppercase tracking-widest">计划总数</span>
+                    </div>
+                    <div className="glass rounded-2xl p-4 flex flex-col items-center gap-1">
+                      <span className="text-lg font-serif italic">{diaries.length}</span>
+                      <span className="text-[10px] opacity-40 uppercase tracking-widest">日记篇数</span>
+                    </div>
+                  </div>
+
+                  <div className="w-full pt-8">
+                    <button 
+                      onClick={() => {
+                        playSound('click');
+                        setShowProfileModal(false);
+                        logout();
+                      }}
+                      className="w-full flex items-center justify-center gap-3 py-4 bg-red-500/10 text-red-400 border border-red-500/20 rounded-2xl hover:bg-red-500/20 transition-all active:scale-95 group"
+                    >
+                      <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" />
+                      <span className="text-sm tracking-widest font-medium">退出登录</span>
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Mood Selection Modal */}
+        <AnimatePresence>
+          {showMoodModal && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[100] glass backdrop-blur-2xl flex items-center justify-center p-6"
+            >
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className="max-w-sm w-full glass rounded-[3rem] p-10"
+              >
+                <div className="flex justify-between items-center mb-10">
+                  <h2 className="text-2xl font-serif italic">今日心情</h2>
+                  <button 
+                    onClick={() => setShowMoodModal(false)}
+                    className="p-2 opacity-40 hover:opacity-100 transition-opacity"
+                  >
+                    <Plus size={24} className="rotate-45" />
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  {MOOD_COLORS.map(m => (
+                    <button
+                      key={m.color}
+                      onClick={() => {
+                        setSelectedMood(m.color);
+                        saveDiary(diaryContent, m.color);
+                        setShowMoodModal(false);
+                        playSound('click');
+                      }}
+                      className={cn(
+                        "w-full flex items-center justify-between p-4 rounded-2xl transition-all",
+                        selectedMood === m.color ? "bg-white/10" : "hover:bg-white/5"
+                      )}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div 
+                          className="w-3 h-3 rounded-full" 
+                          style={{ 
+                            backgroundColor: m.color,
+                            boxShadow: `0 0 12px ${m.color}80`
+                          }} 
+                        />
+                        <span className="text-sm tracking-widest">{m.name}</span>
+                      </div>
+                      <span className="text-[10px] opacity-30 italic">{m.description}</span>
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* AI Insight Modal */}
+        <AnimatePresence>
+          {showInsightModal && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[100] glass backdrop-blur-3xl flex items-center justify-center p-6"
+            >
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className="max-w-lg w-full glass rounded-[3rem] p-10 relative overflow-hidden"
+              >
+                {/* Decorative Elements */}
+                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-blue-500/50 to-transparent" />
+                
+                <div className="flex justify-between items-start mb-8">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-blue-500/20 rounded-full text-blue-400">
+                      <Sparkles size={24} />
+                    </div>
+                    <h2 className="text-2xl font-serif italic">星空周报</h2>
+                  </div>
+                  <button 
+                    onClick={() => setShowInsightModal(false)}
+                    className="p-2 opacity-40 hover:opacity-100 transition-opacity"
+                  >
+                    <Plus size={24} className="rotate-45" />
+                  </button>
+                </div>
+
+                <div className="space-y-6 min-h-[200px] flex flex-col justify-center">
+                  {isInsightLoading ? (
+                    <div className="flex flex-col items-center gap-4 py-12">
+                      <motion.div 
+                        animate={{ rotate: 360 }} 
+                        transition={{ repeat: Infinity, duration: 4, ease: "linear" }}
+                        className="text-blue-400"
+                      >
+                        <Star size={40} />
+                      </motion.div>
+                      <p className="text-sm opacity-40 animate-pulse">正在解读星空的暗示...</p>
+                    </div>
+                  ) : (
+                    <div className="prose prose-invert max-w-none">
+                      <div className="text-white/90 leading-relaxed whitespace-pre-wrap font-light italic">
+                        {weeklyInsight}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {!isInsightLoading && (
+                  <div className="mt-10 pt-8 border-t border-white/5 text-center">
+                    <p className="text-[10px] uppercase tracking-[0.3em] opacity-30 font-bold mb-6">愿你拥有宁静的一周</p>
+                    <button 
+                      onClick={() => setShowInsightModal(false)}
+                      className="px-10 py-4 glass rounded-full text-xs tracking-widest uppercase font-medium hover:bg-white/10 transition-all"
+                    >
+                      收起
+                    </button>
+                  </div>
+                )}
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </motion.div>
+    )}
 
     </div>
   );
@@ -904,7 +1382,9 @@ const StarryCalendar = ({ stats, diaryMap, isNight, selectedDate, onSelectDate }
           const level = getStarLevel(day);
           const isToday = isSameDay(day, new Date());
           const isSelected = isSameDay(day, selectedDate);
-          const hasDiary = diaryMap[format(day, 'yyyy-MM-dd')]?.content.trim().length > 0;
+          const dayEntry = diaryMap[format(day, 'yyyy-MM-dd')];
+          const hasDiary = dayEntry?.content.trim().length > 0;
+          const moodColor = dayEntry?.moodColor;
           
           return (
             <button 
@@ -931,13 +1411,19 @@ const StarryCalendar = ({ stats, diaryMap, isNight, selectedDate, onSelectDate }
                     level === 1 && "w-1.5 h-1.5 bg-white/40",
                     level === 0 && "w-1 h-1 bg-white/10"
                   )}
+                  style={moodColor ? { 
+                    backgroundColor: moodColor, 
+                    boxShadow: `0 0 12px ${moodColor}` 
+                  } : {}}
                 />
               ) : (
                 <span className={cn(
                   "text-xs font-light",
                   level > 0 ? "text-blue-500 font-medium" : "opacity-40",
                   isSelected && "text-blue-600 font-bold"
-                )}>
+                )}
+                style={moodColor ? { color: moodColor } : {}}
+                >
                   {format(day, 'd')}
                 </span>
               )}
