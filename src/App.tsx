@@ -688,10 +688,14 @@ export default function App() {
       const finalHistory = [...newHistory, { role: 'model' as const, text: aiText }];
       await updateDoc(doc(db, 'diaries', entry.id), { chatHistory: finalHistory });
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `diaries/${entry.id}`);
-      const errorMsg = { role: 'model' as const, text: "连接星空失败，请稍后再试。" };
+      console.error('AI Chat Error:', error);
+      const errorMsg = { role: 'model' as const, text: "连接星空失败，请检查 GitHub Secrets 中是否配置了 GEMINI_API_KEY。" };
       if (entry.id) {
-        await updateDoc(doc(db, 'diaries', entry.id), { chatHistory: [...newHistory, errorMsg] });
+        try {
+          await updateDoc(doc(db, 'diaries', entry.id), { chatHistory: [...newHistory, errorMsg] });
+        } catch (e) {
+          console.error('Failed to save error message to Firestore:', e);
+        }
       }
     } finally {
       setIsAiLoading(false);
