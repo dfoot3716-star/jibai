@@ -106,6 +106,15 @@ const MOOD_COLORS = [
   { name: '轻松', color: '#B3FFD9', description: '自在的呼吸' },
 ];
 
+// --- Utils ---
+const generateId = () => {
+  try {
+    return crypto.randomUUID();
+  } catch (e) {
+    return Math.random().toString(36).substring(2) + Date.now().toString(36);
+  }
+};
+
 // --- Hooks ---
 
 function useLocalStorage<T>(key: string, initialValue: T) {
@@ -444,7 +453,7 @@ export default function App() {
       completed: false,
       createdAt: startOfDay(selectedDate).getTime() + (Date.now() % (24 * 60 * 60 * 1000)),
       uid: user.uid,
-      id: crypto.randomUUID() // We'll use this as doc ID or field
+      id: generateId()
     };
     try {
       await setDoc(doc(db, 'tasks', newTask.id), newTask);
@@ -489,10 +498,15 @@ export default function App() {
   const stats = useMemo(() => {
     const grouped: Record<string, { total: number; completed: number }> = {};
     tasks.forEach(t => {
-      const day = format(t.createdAt, 'yyyy-MM-dd');
-      if (!grouped[day]) grouped[day] = { total: 0, completed: 0 };
-      grouped[day].total++;
-      if (t.completed) grouped[day].completed++;
+      if (!t.createdAt) return;
+      try {
+        const day = format(t.createdAt, 'yyyy-MM-dd');
+        if (!grouped[day]) grouped[day] = { total: 0, completed: 0 };
+        grouped[day].total++;
+        if (t.completed) grouped[day].completed++;
+      } catch (e) {
+        console.error("Stats format error:", e);
+      }
     });
     return grouped;
   }, [tasks]);
@@ -526,7 +540,7 @@ export default function App() {
         await updateDoc(doc(db, 'diaries', existing.id), { content, moodColor: moodToSave });
       } else {
         const newDiary = {
-          id: crypto.randomUUID(),
+          id: generateId(),
           date: dateKey,
           content,
           moodColor: moodToSave,
@@ -548,7 +562,7 @@ export default function App() {
     setIsAiLoading(true);
     
     const dateKey = format(selectedDate, 'yyyy-MM-dd');
-    const entry = diaries.find(d => d.date === dateKey) || { id: crypto.randomUUID(), date: dateKey, content: diaryContent, chatHistory: [], uid: user.uid };
+    const entry = diaries.find(d => d.date === dateKey) || { id: generateId(), date: dateKey, content: diaryContent, chatHistory: [], uid: user.uid };
     
     const newHistory = [...entry.chatHistory, { role: 'user' as const, text: userMsg }];
     
@@ -682,71 +696,34 @@ export default function App() {
           transition={{ duration: 1.2 }}
           className="w-full max-w-2xl flex flex-col h-full relative"
         >
-        {/* Header */}
-        <header className="p-8 pb-4 flex justify-between items-end shrink-0">
-          <div className="flex items-center gap-4">
-            {!isSameDay(selectedDate, new Date()) && activeTab === 'list' && (
-              <button 
-                onClick={() => { playSound('click'); setActiveTab('calendar'); }}
-                className="p-2 glass rounded-full opacity-60 hover:opacity-100 transition-opacity"
-              >
-                <ChevronLeft size={20} />
-              </button>
-            )}
-            <div>
-              <h1 className="text-4xl font-serif italic tracking-tight">既白</h1>
-              <p className="text-xs opacity-60 mt-1 font-medium tracking-widest uppercase">
-                {format(selectedDate, 'MMMM do, EEEE')}
-              </p>
+          {!isAuthReady ? (
+            <div className="flex-1 flex items-center justify-center">
+              <motion.div 
+                animate={{ rotate: 360 }}
+                transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                className="w-6 h-6 border-2 border-blue-500/20 border-t-blue-500 rounded-full"
+              />
             </div>
-          </div>
-          
-          <div className="flex items-center gap-4">
-            {user ? (
-              <div className="flex items-center gap-3">
-                <button 
-                  onClick={generateWeeklyInsight}
-                  className="p-2 glass rounded-full text-blue-400 hover:text-blue-300 transition-colors"
-                  title="星空周报"
-                >
-                  <Sparkles size={18} />
-                </button>
-                <button 
-                  onClick={() => { playSound('click'); setShowProfileModal(true); }}
-                  className="relative group transition-transform active:scale-95"
-                >
-                  <img 
-                    src={userProfile?.photoURL || user.photoURL || `https://ui-avatars.com/api/?name=${userProfile?.displayName || user.displayName || 'User'}`} 
-                    alt="Avatar" 
-                    className="w-8 h-8 rounded-full border border-white/20 group-hover:border-blue-400/50 transition-colors object-cover"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="absolute inset-0 rounded-full bg-blue-400/10 opacity-0 group-hover:opacity-100 transition-opacity" />
-                </button>
-              </div>
-            ) : (
-              <button 
-                onClick={login}
-                className="flex items-center gap-2 px-4 py-2 glass rounded-full text-xs tracking-widest uppercase font-medium hover:bg-white/10 transition-all"
+          ) : !user ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-8">
+              <motion.div 
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                className="w-24 h-24 rounded-full glass flex items-center justify-center relative"
               >
-                <LogIn size={14} />
-                <span>登录</span>
-              </button>
-            )}
-          </div>
-        </header>
+                <div className="absolute inset-0 rounded-full bg-blue-500/10 animate-ping" />
+                <LogIn size={40} className="text-blue-400 relative z-10" />
+              </motion.div>
+              
+              <div className="space-y-3">
+                <h2 className="text-4xl font-serif italic tracking-tight">既白</h2>
+                <p className="text-xs opacity-40 tracking-[0.4em] uppercase font-medium">记录每一个晨曦与星空</p>
+              </div>
 
-        {/* Content */}
-        <main className="flex-1 overflow-y-auto px-8 py-4 custom-scrollbar">
-          {!user && isAuthReady ? (
-            <div className="h-full flex flex-col items-center justify-center text-center space-y-8">
-              <div className="w-20 h-20 rounded-full glass flex items-center justify-center">
-                <Star size={40} className="text-blue-400 opacity-60" />
+              <div className="max-w-xs mx-auto">
+                <p className="text-sm opacity-30 leading-relaxed italic">“在这里，你的每一个念头都如星辰般闪耀。”</p>
               </div>
-              <div className="space-y-2">
-                <h2 className="text-2xl font-serif italic">欢迎来到既白</h2>
-                <p className="text-sm opacity-40 max-w-xs">请登录以同步您的日记与计划，开启您的私人星空之旅。</p>
-              </div>
+
               <button 
                 onClick={login}
                 className="px-12 py-4 bg-blue-500 text-white rounded-full text-sm tracking-[0.2em] font-medium shadow-2xl shadow-blue-500/30 hover:bg-blue-600 transition-all active:scale-95"
@@ -755,7 +732,54 @@ export default function App() {
               </button>
             </div>
           ) : (
-            <AnimatePresence mode="wait">
+            <>
+              {/* Header */}
+              <header className="p-8 pb-4 flex justify-between items-end shrink-0">
+                <div className="flex items-center gap-4">
+                  {!isSameDay(selectedDate, new Date()) && activeTab === 'list' && (
+                    <button 
+                      onClick={() => { playSound('click'); setActiveTab('calendar'); }}
+                      className="p-2 glass rounded-full opacity-60 hover:opacity-100 transition-opacity"
+                    >
+                      <ChevronLeft size={20} />
+                    </button>
+                  )}
+                  <div>
+                    <h1 className="text-4xl font-serif italic tracking-tight">既白</h1>
+                    <p className="text-xs opacity-60 mt-1 font-medium tracking-widest uppercase">
+                      {format(selectedDate, 'MMMM do, EEEE')}
+                    </p>
+                  </div>
+                </div>
+                
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-3">
+                    <button 
+                      onClick={generateWeeklyInsight}
+                      className="p-2 glass rounded-full text-blue-400 hover:text-blue-300 transition-colors"
+                      title="星空周报"
+                    >
+                      <Sparkles size={18} />
+                    </button>
+                    <button 
+                      onClick={() => { playSound('click'); setShowProfileModal(true); }}
+                      className="relative group transition-transform active:scale-95"
+                    >
+                      <img 
+                        src={userProfile?.photoURL || user.photoURL || `https://ui-avatars.com/api/?name=${userProfile?.displayName || user.displayName || 'User'}`} 
+                        alt="Avatar" 
+                        className="w-8 h-8 rounded-full border border-white/20 group-hover:border-blue-400/50 transition-colors object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                      <div className="absolute inset-0 rounded-full bg-blue-400/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </button>
+                  </div>
+                </div>
+              </header>
+
+              {/* Content */}
+              <main className="flex-1 overflow-y-auto px-8 py-4 custom-scrollbar">
+                <AnimatePresence mode="wait">
             {activeTab === 'list' && (
               <motion.div
                 key="list"
@@ -983,16 +1007,17 @@ export default function App() {
                 </div>
               </motion.div>
             )}
-            </AnimatePresence>
-          )}
-        </main>
+                </AnimatePresence>
+              </main>
 
-        {/* Navigation */}
-        <nav className="p-6 flex justify-around border-t border-white/10 shrink-0">
-          <NavButton active={activeTab === 'list'} onClick={() => { playSound('click'); setActiveTab('list'); }} icon={<List size={20} />} />
-          <NavButton active={activeTab === 'calendar'} onClick={() => { playSound('click'); setActiveTab('calendar'); }} icon={<CalendarIcon size={20} />} />
-          <NavButton active={activeTab === 'diary'} onClick={() => { playSound('click'); setActiveTab('diary'); }} icon={<BookOpen size={20} />} />
-        </nav>
+              {/* Navigation */}
+              <nav className="p-6 flex justify-around border-t border-white/10 shrink-0">
+                <NavButton active={activeTab === 'list'} onClick={() => { playSound('click'); setActiveTab('list'); }} icon={<List size={20} />} />
+                <NavButton active={activeTab === 'calendar'} onClick={() => { playSound('click'); setActiveTab('calendar'); }} icon={<CalendarIcon size={20} />} />
+                <NavButton active={activeTab === 'diary'} onClick={() => { playSound('click'); setActiveTab('diary'); }} icon={<BookOpen size={20} />} />
+              </nav>
+            </>
+          )}
 
         {/* Add Modal */}
         <AnimatePresence>
