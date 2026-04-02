@@ -282,6 +282,40 @@ const Background = ({ time }: { time: Date }) => {
 };
 
 
+// --- Error Boundary ---
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: Error | null }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("ErrorBoundary caught an error", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="h-screen w-screen flex flex-col items-center justify-center bg-slate-900 text-white p-8 text-center">
+          <h1 className="text-2xl font-serif mb-4">抱歉，应用遇到了点小麻烦</h1>
+          <p className="text-sm opacity-60 mb-8 max-w-md">{this.state.error?.message || "未知错误"}</p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="px-8 py-3 bg-blue-500 rounded-full text-sm tracking-widest"
+          >
+            刷新重试
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
   const [user, setUser] = useState<any>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
@@ -468,6 +502,9 @@ export default function App() {
       clearTimeout(introTimer);
     };
   }, []);
+
+  // Ensure we always render something, even if isLoaded is false (though we set it immediately)
+  // The Background and AnimatePresence (Intro) should be visible immediately.
 
   const generateWeeklyInsight = async () => {
     if (!user) return;
@@ -664,8 +701,9 @@ export default function App() {
   const isNight = currentTime.getHours() >= 20 || currentTime.getHours() < 5;
 
   return (
-    <div className={cn("h-screen flex flex-col items-center justify-center p-4 md:p-8 overflow-hidden transition-colors duration-1000", isNight ? "text-white" : "text-slate-900")}>
-      <Background time={currentTime} />
+    <ErrorBoundary>
+      <div className={cn("h-screen flex flex-col items-center justify-center p-4 md:p-8 overflow-hidden transition-colors duration-1000", isNight ? "text-white" : "text-slate-900")}>
+        <Background time={currentTime} />
 
       <AnimatePresence mode="wait">
         {showIntro && (
@@ -1397,6 +1435,7 @@ export default function App() {
     )}
 
     </div>
+    </ErrorBoundary>
   );
 }
 
