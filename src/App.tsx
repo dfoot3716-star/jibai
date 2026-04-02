@@ -663,8 +663,6 @@ export default function App() {
 
   const isNight = currentTime.getHours() >= 20 || currentTime.getHours() < 5;
 
-  if (!isLoaded) return null;
-
   return (
     <div className={cn("h-screen flex flex-col items-center justify-center p-4 md:p-8 overflow-hidden transition-colors duration-1000", isNight ? "text-white" : "text-slate-900")}>
       <Background time={currentTime} />
