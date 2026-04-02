@@ -16,7 +16,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Settings,
-  Star
+  Star,
+  BookOpen,
+  Send,
+  MessageSquare
 } from 'lucide-react';
 import { 
   format, 
@@ -27,8 +30,10 @@ import {
   startOfDay, 
   addMonths, 
   subMonths,
-  getDay
+  getDay,
+  isAfter
 } from 'date-fns';
+import { GoogleGenAI } from "@google/genai";
 import { cn } from './lib/utils';
 
 // --- Types ---
@@ -46,6 +51,13 @@ interface Task {
   priority: Priority;
   completed: boolean;
   createdAt: number;
+}
+
+interface DiaryEntry {
+  id: string;
+  date: string; // YYYY-MM-DD
+  content: string;
+  chatHistory: { role: 'user' | 'model'; text: string }[];
 }
 
 interface DayStats {
@@ -180,7 +192,8 @@ const Background = ({ time }: { time: Date }) => {
 
 export default function App() {
   const [tasks, setTasks] = useLocalStorage<Task[]>('jibai-tasks', []);
-  const [activeTab, setActiveTab] = useState<'list' | 'calendar' | 'music'>('list');
+  const [diaries, setDiaries] = useLocalStorage<DiaryEntry[]>('jibai-diaries', []);
+  const [activeTab, setActiveTab] = useState<'list' | 'calendar' | 'music' | 'diary'>('list');
   const [currentTime, setCurrentTime] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(startOfDay(new Date()));
   const [showAddModal, setShowAddModal] = useState(false);
@@ -188,6 +201,12 @@ export default function App() {
   const [newTaskPriority, setNewTaskPriority] = useState<Priority>(Priority.IMPORTANT_URGENT);
   const [isLoaded, setIsLoaded] = useState(false);
   const [showIntro, setShowIntro] = useState(true);
+  
+  // Diary State
+  const [diaryContent, setDiaryContent] = useState('');
+  const [chatInput, setChatInput] = useState('');
+  const [isChatting, setIsChatting] = useState(false);
+  const [isAiLoading, setIsAiLoading] = useState(false);
   
   // Timer State
   const [timerSeconds, setTimerSeconds] = useState(25 * 60);
@@ -277,6 +296,77 @@ export default function App() {
     });
     return grouped;
   }, [tasks]);
+
+  const diaryMap = useMemo(() => {
+    const map: Record<string, DiaryEntry> = {};
+    diaries.forEach(d => {
+      map[d.date] = d;
+    });
+    return map;
+  }, [diaries]);
+
+  const currentDiary = useMemo(() => {
+    const dateKey = format(selectedDate, 'yyyy-MM-dd');
+    return diaryMap[dateKey] || { id: '', date: dateKey, content: '', chatHistory: [] };
+  }, [diaryMap, selectedDate]);
+
+  useEffect(() => {
+    setDiaryContent(currentDiary.content);
+  }, [currentDiary]);
+
+  const saveDiary = (content: string) => {
+    const dateKey = format(selectedDate, 'yyyy-MM-dd');
+    const existing = diaries.find(d => d.date === dateKey);
+    if (existing) {
+      setDiaries(diaries.map(d => d.date === dateKey ? { ...d, content } : d));
+    } else {
+      setDiaries([...diaries, { id: crypto.randomUUID(), date: dateKey, content, chatHistory: [] }]);
+    }
+  };
+
+  const handleAiChat = async () => {
+    if (!chatInput.trim() || isAiLoading) return;
+    
+    const userMsg = chatInput;
+    setChatInput('');
+    setIsAiLoading(true);
+    
+    const dateKey = format(selectedDate, 'yyyy-MM-dd');
+    const entry = diaries.find(d => d.date === dateKey) || { id: crypto.randomUUID(), date: dateKey, content: diaryContent, chatHistory: [] };
+    
+    const newHistory = [...entry.chatHistory, { role: 'user' as const, text: userMsg }];
+    
+    // Update local state immediately for UI
+    const updatedEntry = { ...entry, chatHistory: newHistory };
+    if (diaries.find(d => d.date === dateKey)) {
+      setDiaries(diaries.map(d => d.date === dateKey ? updatedEntry : d));
+    } else {
+      setDiaries([...diaries, updatedEntry]);
+    }
+
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+      const model = ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: newHistory.map(h => ({ role: h.role, parts: [{ text: h.text }] })),
+        config: {
+          systemInstruction: `你是一个温柔、富有同理心的日记助手。用户正在写关于 ${dateKey} 的日记。日记内容是：“${diaryContent}”。请根据日记内容和用户的提问，提供有深度的反馈、鼓励或建议。保持简洁、诗意且温暖。`,
+        }
+      });
+
+      const response = await model;
+      const aiText = response.text || "抱歉，我现在无法回应。";
+      
+      const finalHistory = [...newHistory, { role: 'model' as const, text: aiText }];
+      setDiaries(prev => prev.map(d => d.date === dateKey ? { ...d, chatHistory: finalHistory } : d));
+    } catch (error) {
+      console.error("AI Chat Error:", error);
+      const errorMsg = { role: 'model' as const, text: "连接星空失败，请稍后再试。" };
+      setDiaries(prev => prev.map(d => d.date === dateKey ? { ...d, chatHistory: [...newHistory, errorMsg] } : d));
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
 
   const isNight = currentTime.getHours() >= 20 || currentTime.getHours() < 5;
 
@@ -437,51 +527,61 @@ export default function App() {
                     <p className="font-serif italic">每个计划的开始都是黎明</p>
                   </div>
                 ) : (
-                  filteredTasks
-                    .sort((a, b) => {
-                      if (a.completed !== b.completed) return a.completed ? 1 : -1;
-                      const pOrder = Object.values(Priority);
-                      return pOrder.indexOf(a.priority) - pOrder.indexOf(b.priority);
-                    })
-                    .map(task => (
-                      <motion.div
-                        layout
-                        key={task.id}
-                        className={cn(
-                          "flex items-center gap-4 group transition-opacity",
-                          task.completed && "opacity-40"
-                        )}
-                      >
-                        <button 
-                          onClick={() => toggleTask(task.id)}
-                          className={cn(
-                            "flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all",
-                            task.completed ? "bg-blue-500 border-blue-500" : "border-blue-400/30"
-                          )}
-                        >
-                          {task.completed && <Check size={14} className="text-white" />}
-                        </button>
-                        
-                        <div className="flex-1">
-                          <p className={cn(
-                            "text-lg font-light transition-all",
-                            task.completed && "line-through"
-                          )}>
-                            {task.text}
-                          </p>
-                        </div>
+                  <div className="space-y-8">
+                    {Object.entries(PRIORITY_CONFIG).map(([priority, config]) => {
+                      const priorityTasks = filteredTasks.filter(t => t.priority === priority);
+                      if (priorityTasks.length === 0) return null;
+                      
+                      return (
+                        <div key={priority} className="space-y-4">
+                          <div className="flex items-center gap-2 opacity-30">
+                            <div className={cn("w-1 h-1 rounded-full", config.color)} />
+                            <p className="text-[9px] uppercase tracking-[0.2em] font-bold">{config.label}</p>
+                          </div>
+                          <div className="space-y-4">
+                            {priorityTasks
+                              .sort((a, b) => (a.completed === b.completed ? 0 : a.completed ? 1 : -1))
+                              .map(task => (
+                                <motion.div
+                                  layout
+                                  key={task.id}
+                                  className={cn(
+                                    "flex items-center gap-4 group transition-opacity",
+                                    task.completed && "opacity-40"
+                                  )}
+                                >
+                                  <button 
+                                    onClick={() => toggleTask(task.id)}
+                                    className={cn(
+                                      "flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all",
+                                      task.completed ? "bg-blue-500 border-blue-500" : "border-blue-400/30"
+                                    )}
+                                  >
+                                    {task.completed && <Check size={14} className="text-white" />}
+                                  </button>
+                                  
+                                  <div className="flex-1">
+                                    <p className={cn(
+                                      "text-lg font-light transition-all",
+                                      task.completed && "line-through"
+                                    )}>
+                                      {task.text}
+                                    </p>
+                                  </div>
 
-                        <div className="flex items-center gap-3">
-                          <div className={cn(PRIORITY_CONFIG[task.priority].dot, PRIORITY_CONFIG[task.priority].color)} />
-                          <button 
-                            onClick={() => deleteTask(task.id)}
-                            className="opacity-0 group-hover:opacity-40 hover:opacity-100 transition-opacity"
-                          >
-                            <Plus size={14} className="rotate-45" />
-                          </button>
+                                  <button 
+                                    onClick={() => deleteTask(task.id)}
+                                    className="opacity-0 group-hover:opacity-40 hover:opacity-100 transition-opacity"
+                                  >
+                                    <Plus size={14} className="rotate-45" />
+                                  </button>
+                                </motion.div>
+                              ))}
+                          </div>
                         </div>
-                      </motion.div>
-                    ))
+                      );
+                    })}
+                  </div>
                 )}
               </motion.div>
             )}
@@ -495,6 +595,7 @@ export default function App() {
               >
                 <StarryCalendar 
                   stats={stats} 
+                  diaryMap={diaryMap}
                   isNight={isNight} 
                   selectedDate={selectedDate}
                   onSelectDate={(date) => {
@@ -502,6 +603,97 @@ export default function App() {
                     setActiveTab('list');
                   }}
                 />
+              </motion.div>
+            )}
+
+            {activeTab === 'diary' && (
+              <motion.div
+                key="diary"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="h-full flex flex-col space-y-6"
+              >
+                <div className="flex-1 flex flex-col glass rounded-[2.5rem] p-8 overflow-hidden relative">
+                  {!isChatting ? (
+                    <>
+                      <div className="flex justify-between items-center mb-6">
+                        <p className="text-[10px] uppercase tracking-[0.3em] opacity-40 font-bold">每日心语</p>
+                        <button 
+                          onClick={() => setIsChatting(true)}
+                          className="p-2 glass rounded-full opacity-60 hover:opacity-100 transition-opacity"
+                        >
+                          <MessageSquare size={18} />
+                        </button>
+                      </div>
+                      <textarea
+                        value={diaryContent}
+                        onChange={(e) => {
+                          setDiaryContent(e.target.value);
+                          saveDiary(e.target.value);
+                        }}
+                        placeholder="此刻，你想记录下什么？"
+                        className="flex-1 bg-transparent border-none focus:ring-0 p-0 text-lg font-light leading-relaxed placeholder:opacity-20 resize-none custom-scrollbar min-h-[200px]"
+                        spellCheck={false}
+                      />
+                    </>
+                  ) : (
+                    <div className="flex flex-col h-full">
+                      <div className="flex justify-between items-center mb-6">
+                        <p className="text-[10px] uppercase tracking-[0.3em] opacity-40 font-bold">星空对话</p>
+                        <button 
+                          onClick={() => setIsChatting(false)}
+                          className="p-2 glass rounded-full opacity-60 hover:opacity-100 transition-opacity"
+                        >
+                          <ChevronLeft size={18} />
+                        </button>
+                      </div>
+                      
+                      <div className="flex-1 overflow-y-auto space-y-4 mb-4 custom-scrollbar pr-2">
+                        {currentDiary.chatHistory.length === 0 && (
+                          <div className="h-full flex items-center justify-center opacity-20 text-center px-8">
+                            <p className="text-sm italic">“在这里，你可以和我聊聊今天的感悟。”</p>
+                          </div>
+                        )}
+                        {currentDiary.chatHistory.map((msg, i) => (
+                          <div key={i} className={cn(
+                            "max-w-[85%] p-4 rounded-3xl text-sm leading-relaxed",
+                            msg.role === 'user' 
+                              ? "ml-auto bg-blue-500/20 text-blue-200 rounded-tr-none" 
+                              : "mr-auto glass text-white/80 rounded-tl-none"
+                          )}>
+                            {msg.text}
+                          </div>
+                        ))}
+                        {isAiLoading && (
+                          <div className="mr-auto glass p-4 rounded-3xl rounded-tl-none flex gap-1">
+                            <motion.div animate={{ opacity: [0.2, 1, 0.2] }} transition={{ repeat: Infinity, duration: 1 }} className="w-1 h-1 bg-white rounded-full" />
+                            <motion.div animate={{ opacity: [0.2, 1, 0.2] }} transition={{ repeat: Infinity, duration: 1, delay: 0.2 }} className="w-1 h-1 bg-white rounded-full" />
+                            <motion.div animate={{ opacity: [0.2, 1, 0.2] }} transition={{ repeat: Infinity, duration: 1, delay: 0.4 }} className="w-1 h-1 bg-white rounded-full" />
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={chatInput}
+                          onChange={(e) => setChatInput(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleAiChat()}
+                          placeholder="向星空提问..."
+                          className="w-full bg-white/5 border border-white/10 rounded-2xl py-3 pl-4 pr-12 text-sm focus:ring-1 focus:ring-blue-500/50 outline-none"
+                        />
+                        <button 
+                          onClick={handleAiChat}
+                          disabled={isAiLoading}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-blue-400 hover:text-blue-300 transition-colors disabled:opacity-20"
+                        >
+                          <Send size={18} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </motion.div>
             )}
 
@@ -514,18 +706,18 @@ export default function App() {
                 className="flex flex-col items-center justify-center h-full text-center"
               >
                 {/* Timer Section */}
-                <div className="space-y-10">
+                <div className="space-y-12">
                   <div className="relative inline-block">
-                    <svg className="w-48 h-48 -rotate-90">
+                    <svg className="w-64 h-64 -rotate-90">
                       <circle 
-                        cx="96" cy="96" r="88" 
+                        cx="128" cy="128" r="118" 
                         className="stroke-white/10 fill-none" 
                         strokeWidth="1.5" 
                       />
                       <motion.circle 
-                        cx="96" cy="96" r="88" 
+                        cx="128" cy="128" r="118" 
                         className="stroke-blue-500 fill-none" 
-                        strokeWidth="2.5" 
+                        strokeWidth="3" 
                         strokeLinecap="round"
                         initial={{ pathLength: 1 }}
                         animate={{ pathLength: timerSeconds / (25 * 60) }}
@@ -533,21 +725,21 @@ export default function App() {
                       />
                     </svg>
                     <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      <span className="text-6xl font-light tracking-tighter">{formatTime(timerSeconds)}</span>
-                      <p className="text-[9px] uppercase tracking-[0.2em] opacity-40 mt-2">专注时刻</p>
+                      <span className="text-7xl font-light tracking-tighter">{formatTime(timerSeconds)}</span>
+                      <p className="text-[10px] uppercase tracking-[0.3em] opacity-40 mt-4">专注时刻</p>
                     </div>
                   </div>
                   
-                  <div className="flex justify-center gap-4">
+                  <div className="flex justify-center gap-6">
                     <button 
                       onClick={toggleTimer}
-                      className="px-10 py-3 glass rounded-full text-xs tracking-widest uppercase font-medium hover:bg-white/10 transition-all active:scale-95"
+                      className="px-12 py-4 glass rounded-full text-sm tracking-widest uppercase font-medium hover:bg-white/10 transition-all active:scale-95"
                     >
                       {isTimerRunning ? "暂停" : "开始"}
                     </button>
                     <button 
                       onClick={resetTimer}
-                      className="px-10 py-3 glass rounded-full text-xs tracking-widest uppercase font-medium hover:bg-white/10 transition-all active:scale-95"
+                      className="px-12 py-4 glass rounded-full text-sm tracking-widest uppercase font-medium hover:bg-white/10 transition-all active:scale-95"
                     >
                       重置
                     </button>
@@ -562,6 +754,7 @@ export default function App() {
         <nav className="p-6 flex justify-around border-t border-white/10 shrink-0">
           <NavButton active={activeTab === 'list'} onClick={() => { playSound('click'); setActiveTab('list'); }} icon={<List size={20} />} />
           <NavButton active={activeTab === 'calendar'} onClick={() => { playSound('click'); setActiveTab('calendar'); }} icon={<CalendarIcon size={20} />} />
+          <NavButton active={activeTab === 'diary'} onClick={() => { playSound('click'); setActiveTab('diary'); }} icon={<BookOpen size={20} />} />
           <NavButton active={activeTab === 'music'} onClick={() => { playSound('click'); setActiveTab('music'); }} icon={<Moon size={20} />} />
         </nav>
 
@@ -572,7 +765,10 @@ export default function App() {
               initial={{ opacity: 0, scale: 1.05 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 1.05 }}
-              className="absolute inset-0 z-[60] glass backdrop-blur-2xl flex flex-col p-10"
+              className={cn(
+              "fixed inset-0 z-[60] glass backdrop-blur-2xl flex flex-col p-6 md:p-10 overflow-y-auto",
+              "pb-[safe-area-inset-bottom]"
+            )}
             >
               <div className="flex justify-between items-center mb-16">
                 <h2 className="text-3xl font-serif italic">新计划</h2>
@@ -598,9 +794,9 @@ export default function App() {
                   onKeyDown={(e) => e.key === 'Enter' && addTask()}
                 />
 
-                <div className="space-y-6">
+                <div className="space-y-4">
                   <p className="text-[10px] opacity-30 uppercase tracking-[0.3em] font-bold">优先级</p>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-2 gap-3 md:gap-4">
                     {Object.entries(PRIORITY_CONFIG).map(([key, config]) => (
                       <button
                         key={key}
@@ -609,26 +805,28 @@ export default function App() {
                           setNewTaskPriority(key as Priority);
                         }}
                         className={cn(
-                          "flex items-center gap-4 p-5 rounded-3xl border transition-all duration-300",
+                          "flex items-center gap-2 md:gap-4 p-3 md:p-5 rounded-2xl md:rounded-3xl border transition-all duration-300",
                           newTaskPriority === key 
                             ? "bg-blue-500 text-white border-blue-500 shadow-xl shadow-blue-500/20 scale-[1.02]" 
                             : "bg-white/5 border-white/10 opacity-40 hover:opacity-100"
                         )}
                       >
-                        <div className={cn(config.dot, newTaskPriority === key ? "bg-white" : config.color)} />
-                        <span className="text-sm tracking-wide">{config.label}</span>
+                        <div className={cn(config.dot, "shrink-0", newTaskPriority === key ? "bg-white" : config.color)} />
+                        <span className="text-xs md:text-sm tracking-wide whitespace-nowrap">{config.label}</span>
                       </button>
                     ))}
                   </div>
                 </div>
               </div>
 
-              <button 
-                onClick={addTask}
-                className="mt-12 w-full py-6 bg-blue-500 text-white rounded-[2.5rem] text-sm tracking-[0.2em] font-medium shadow-2xl shadow-blue-500/30 hover:bg-blue-600 transition-all active:scale-[0.98]"
-              >
-                开启黎明
-              </button>
+              <div className="mt-auto pt-8">
+                <button 
+                  onClick={addTask}
+                  className="w-full py-5 md:py-6 bg-blue-500 text-white rounded-[2rem] md:rounded-[2.5rem] text-sm tracking-[0.2em] font-medium shadow-2xl shadow-blue-500/30 hover:bg-blue-600 transition-all active:scale-[0.98]"
+                >
+                  开启黎明
+                </button>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -650,8 +848,9 @@ const NavButton = ({ active, onClick, icon }: { active: boolean, onClick: () => 
   </button>
 );
 
-const StarryCalendar = ({ stats, isNight, selectedDate, onSelectDate }: { 
+const StarryCalendar = ({ stats, diaryMap, isNight, selectedDate, onSelectDate }: { 
   stats: Record<string, { total: number; completed: number }>, 
+  diaryMap: Record<string, DiaryEntry>,
   isNight: boolean,
   selectedDate: Date,
   onSelectDate: (date: Date) => void
@@ -705,6 +904,7 @@ const StarryCalendar = ({ stats, isNight, selectedDate, onSelectDate }: {
           const level = getStarLevel(day);
           const isToday = isSameDay(day, new Date());
           const isSelected = isSameDay(day, selectedDate);
+          const hasDiary = diaryMap[format(day, 'yyyy-MM-dd')]?.content.trim().length > 0;
           
           return (
             <button 
@@ -740,6 +940,12 @@ const StarryCalendar = ({ stats, isNight, selectedDate, onSelectDate }: {
                 )}>
                   {format(day, 'd')}
                 </span>
+              )}
+
+              {hasDiary && (
+                <div className="absolute bottom-1.5 flex justify-center w-full">
+                  <div className="w-1 h-1 bg-blue-400 rounded-full shadow-[0_0_8px_rgba(96,165,250,1)]" />
+                </div>
               )}
             </button>
           );
