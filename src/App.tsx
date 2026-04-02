@@ -61,6 +61,57 @@ import {
 
 // --- Types ---
 
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+const handleFirestoreError = (error: unknown, operationType: OperationType, path: string | null) => {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+};
+
 enum Priority {
   IMPORTANT_URGENT = 'IMPORTANT_URGENT',
   IMPORTANT_NOT_URGENT = 'IMPORTANT_NOT_URGENT',
@@ -321,7 +372,7 @@ export default function App() {
         setUserProfile(snapshot.data());
       }
     }, (error) => {
-      console.error("Firestore User Profile Error:", error);
+      handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
     });
 
     const tasksQuery = query(collection(db, 'tasks'), where('uid', '==', user.uid));
@@ -329,7 +380,7 @@ export default function App() {
       const t = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Task));
       setTasks(t);
     }, (error) => {
-      console.error("Firestore Tasks Error:", error);
+      handleFirestoreError(error, OperationType.LIST, 'tasks');
     });
 
     const diariesQuery = query(collection(db, 'diaries'), where('uid', '==', user.uid));
@@ -337,7 +388,7 @@ export default function App() {
       const d = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as DiaryEntry));
       setDiaries(d);
     }, (error) => {
-      console.error("Firestore Diaries Error:", error);
+      handleFirestoreError(error, OperationType.LIST, 'diaries');
     });
 
     return () => {
@@ -357,8 +408,10 @@ export default function App() {
         setLoginError("登录窗口被浏览器拦截，请允许弹出窗口。");
       } else if (error.code === 'auth/popup-closed-by-user') {
         // User closed the popup, no need to show error
+      } else if (error.code === 'auth/unauthorized-domain') {
+        setLoginError("当前域名未被授权。如果是克隆的应用，请点击设置重新配置 Firebase。");
       } else {
-        setLoginError("登录失败，请稍后重试。");
+        setLoginError(`登录失败 (${error.code || '未知错误'})，请稍后重试。`);
       }
     }
   };
@@ -397,7 +450,7 @@ export default function App() {
         
         playSound('complete');
       } catch (error) {
-        console.error("Avatar Update Error:", error);
+        handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}`);
         alert("更换头像失败，请重试。");
       } finally {
         setIsAvatarLoading(false);
@@ -470,7 +523,7 @@ export default function App() {
       setShowAddModal(false);
       playSound('add');
     } catch (error) {
-      console.error("Add Task Error:", error);
+      handleFirestoreError(error, OperationType.WRITE, `tasks/${newTask.id}`);
     }
   };
 
@@ -487,7 +540,7 @@ export default function App() {
     try {
       await updateDoc(doc(db, 'tasks', id), { completed: !task.completed });
     } catch (error) {
-      console.error("Toggle Task Error:", error);
+      handleFirestoreError(error, OperationType.UPDATE, `tasks/${id}`);
     }
   };
 
@@ -496,7 +549,7 @@ export default function App() {
     try {
       await deleteDoc(doc(db, 'tasks', id));
     } catch (error) {
-      console.error("Delete Task Error:", error);
+      handleFirestoreError(error, OperationType.DELETE, `tasks/${id}`);
     }
   };
 
@@ -559,7 +612,7 @@ export default function App() {
         await setDoc(doc(db, 'diaries', newDiary.id), newDiary);
       }
     } catch (error) {
-      console.error("Save Diary Error:", error);
+      handleFirestoreError(error, OperationType.WRITE, 'diaries');
     }
   };
 
@@ -598,7 +651,7 @@ export default function App() {
       const finalHistory = [...newHistory, { role: 'model' as const, text: aiText }];
       await updateDoc(doc(db, 'diaries', entry.id), { chatHistory: finalHistory });
     } catch (error) {
-      console.error("AI Chat Error:", error);
+      handleFirestoreError(error, OperationType.WRITE, `diaries/${entry.id}`);
       const errorMsg = { role: 'model' as const, text: "连接星空失败，请稍后再试。" };
       if (entry.id) {
         await updateDoc(doc(db, 'diaries', entry.id), { chatHistory: [...newHistory, errorMsg] });
