@@ -837,50 +837,48 @@ export default function App() {
           ) : (
             <>
               {/* Header */}
-              {!isChatting && (
-                <header className="p-8 pb-4 flex justify-between items-end shrink-0">
-                  <div className="flex items-center gap-4">
-                    {!isSameDay(selectedDate, new Date()) && activeTab === 'list' && (
-                      <button 
-                        onClick={() => { playSound('click'); setActiveTab('calendar'); }}
-                        className="p-2 glass rounded-full opacity-60 hover:opacity-100 transition-opacity"
-                      >
-                        <ChevronLeft size={20} />
-                      </button>
-                    )}
-                    <div>
-                      <h1 className="text-4xl font-serif italic tracking-tight">既白</h1>
-                      <p className="text-xs opacity-60 mt-1 font-medium tracking-widest uppercase">
-                        {format(selectedDate, 'MMMM do, EEEE')}
-                      </p>
-                    </div>
+              <header className="p-8 pb-4 flex justify-between items-end shrink-0">
+                <div className="flex items-center gap-4">
+                  {!isSameDay(selectedDate, new Date()) && activeTab === 'list' && (
+                    <button 
+                      onClick={() => { playSound('click'); setActiveTab('calendar'); }}
+                      className="p-2 glass rounded-full opacity-60 hover:opacity-100 transition-opacity"
+                    >
+                      <ChevronLeft size={20} />
+                    </button>
+                  )}
+                  <div>
+                    <h1 className="text-4xl font-serif italic tracking-tight">既白</h1>
+                    <p className="text-xs opacity-60 mt-1 font-medium tracking-widest uppercase">
+                      {format(selectedDate, 'MMMM do, EEEE')}
+                    </p>
                   </div>
-                  
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-3">
-                      <button 
-                        onClick={generateWeeklyInsight}
-                        className="p-2 glass rounded-full text-blue-400 hover:text-blue-300 transition-colors"
-                        title="星空周报"
-                      >
-                        <Sparkles size={18} />
-                      </button>
-                      <button 
-                        onClick={() => { playSound('click'); setShowProfileModal(true); }}
-                        className="relative group transition-transform active:scale-95"
-                      >
-                        <img 
-                          src={userProfile?.photoURL || user.photoURL || `https://ui-avatars.com/api/?name=${userProfile?.displayName || user.displayName || 'User'}`} 
-                          alt="Avatar" 
-                          className="w-8 h-8 rounded-full border border-white/20 group-hover:border-blue-400/50 transition-colors object-cover"
-                          referrerPolicy="no-referrer"
-                        />
-                        <div className="absolute inset-0 rounded-full bg-blue-400/10 opacity-0 group-hover:opacity-100 transition-opacity" />
-                      </button>
-                    </div>
+                </div>
+                
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-3">
+                    <button 
+                      onClick={generateWeeklyInsight}
+                      className="p-2 glass rounded-full text-blue-400 hover:text-blue-300 transition-colors"
+                      title="星空周报"
+                    >
+                      <Sparkles size={18} />
+                    </button>
+                    <button 
+                      onClick={() => { playSound('click'); setShowProfileModal(true); }}
+                      className="relative group transition-transform active:scale-95"
+                    >
+                      <img 
+                        src={userProfile?.photoURL || user.photoURL || `https://ui-avatars.com/api/?name=${userProfile?.displayName || user.displayName || 'User'}`} 
+                        alt="Avatar" 
+                        className="w-8 h-8 rounded-full border border-white/20 group-hover:border-blue-400/50 transition-colors object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                      <div className="absolute inset-0 rounded-full bg-blue-400/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </button>
                   </div>
-                </header>
-              )}
+                </div>
+              </header>
 
               {/* Content */}
               <main className="flex-1 overflow-y-auto px-4 py-4 custom-scrollbar">
@@ -1057,24 +1055,25 @@ export default function App() {
               </main>
 
               {/* Navigation */}
-              {!isChatting && (
-                <nav className="px-8 pt-2 pb-10 flex justify-around border-t border-white/10 shrink-0">
-                  <NavButton active={activeTab === 'list'} onClick={() => { playSound('click'); setActiveTab('list'); }} icon={<List size={20} />} />
-                  <NavButton active={activeTab === 'calendar'} onClick={() => { playSound('click'); setActiveTab('calendar'); }} icon={<CalendarIcon size={20} />} />
-                  <NavButton active={activeTab === 'diary'} onClick={() => { playSound('click'); setActiveTab('diary'); }} icon={<BookOpen size={20} />} />
-                </nav>
-              )}
+              <nav className="px-8 pt-2 pb-10 flex justify-around border-t border-white/10 shrink-0">
+                <NavButton active={activeTab === 'list'} onClick={() => { playSound('click'); setActiveTab('list'); }} icon={<List size={20} />} />
+                <NavButton active={activeTab === 'calendar'} onClick={() => { playSound('click'); setActiveTab('calendar'); }} icon={<CalendarIcon size={20} />} />
+                <NavButton active={activeTab === 'diary'} onClick={() => { playSound('click'); setActiveTab('diary'); }} icon={<BookOpen size={20} />} />
+              </nav>
 
               {/* Full Screen Chat Overlay */}
               <AnimatePresence>
                 {isChatting && (
                   <motion.div
-                    initial={{ opacity: 1 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 1 }}
-                    transition={{ duration: 0 }}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    transition={{ 
+                      duration: 0.5, 
+                      ease: [0.22, 1, 0.36, 1]
+                    }}
                     className={cn(
-                      "fixed inset-0 z-[80] flex flex-col p-8 md:p-12 transition-colors duration-0",
+                      "fixed inset-0 z-[80] flex flex-col p-8 md:p-12 transition-colors duration-500",
                       isNight ? "bg-[#020617]" : "bg-[#f8fafc]"
                     )}
                   >
