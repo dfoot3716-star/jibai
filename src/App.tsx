@@ -881,7 +881,7 @@ export default function App() {
               </header>
 
               {/* Content */}
-              <main className="flex-1 overflow-y-auto px-8 py-4 custom-scrollbar">
+              <main className="flex-1 overflow-y-auto px-4 py-4 custom-scrollbar">
                 <AnimatePresence mode="wait">
             {activeTab === 'list' && (
               <motion.div
@@ -1011,12 +1011,15 @@ export default function App() {
                 exit={{ opacity: 0, y: -10 }}
                 className="h-full flex flex-col space-y-6"
               >
-                <div className="flex-1 flex flex-col bg-white/5 backdrop-blur-sm rounded-[2.5rem] p-8 overflow-hidden relative">
+                <div className={cn(
+                  "flex-1 flex flex-col overflow-hidden relative transition-all duration-500 rounded-[2.5rem] p-4",
+                  !isChatting ? "bg-white/5 backdrop-blur-sm" : "bg-transparent"
+                )}>
                   {!isChatting ? (
                     <>
-                      <div className="flex justify-between items-center mb-6">
+                      <div className="flex justify-between items-center mb-8 px-2">
                         <div className="flex items-center gap-4">
-                          <p className="text-[10px] uppercase tracking-[0.3em] opacity-40 font-bold">每日心语</p>
+                          <p className="text-[10px] uppercase tracking-[0.4em] opacity-40 font-bold">每日心语</p>
                           <button 
                             onClick={() => setShowMoodModal(true)}
                             className="flex items-center gap-2 px-3 py-1 glass rounded-full hover:bg-white/5 transition-colors"
@@ -1047,14 +1050,14 @@ export default function App() {
                           saveDiary(e.target.value);
                         }}
                         placeholder="此刻，你想记录下什么？"
-                        className="flex-1 bg-transparent border-none focus:ring-0 outline-none p-0 text-lg font-light leading-relaxed placeholder:opacity-20 resize-none custom-scrollbar min-h-[200px]"
+                        className="flex-1 bg-transparent border-none focus:ring-0 outline-none px-2 text-lg font-light leading-relaxed placeholder:opacity-20 resize-none custom-scrollbar min-h-[200px]"
                         spellCheck={false}
                       />
                     </>
                   ) : (
                     <div className="flex flex-col h-full">
-                      <div className="flex justify-between items-center mb-6">
-                        <p className="text-[10px] uppercase tracking-[0.3em] opacity-40 font-bold">星空对话</p>
+                      <div className="flex justify-between items-center mb-8 px-2">
+                        <p className="text-[10px] uppercase tracking-[0.4em] opacity-40 font-bold">星空对话</p>
                         <button 
                           onClick={() => setIsChatting(false)}
                           className="p-2 glass rounded-full opacity-60 hover:opacity-100 transition-opacity"
@@ -1071,10 +1074,10 @@ export default function App() {
                         )}
                         {currentDiary.chatHistory.map((msg, i) => (
                           <div key={i} className={cn(
-                            "max-w-[85%] p-4 rounded-3xl text-sm leading-relaxed",
+                            "max-w-full p-4 rounded-3xl text-sm leading-relaxed shadow-sm",
                             msg.role === 'user' 
-                              ? "ml-auto bg-blue-500/20 text-blue-200 rounded-tr-none" 
-                              : "mr-auto glass text-white/80 rounded-tl-none"
+                              ? "ml-auto bg-blue-500/10 text-blue-100 rounded-tr-none" 
+                              : "mr-auto glass text-white rounded-tl-none"
                           )}>
                             {msg.text}
                           </div>
@@ -1088,21 +1091,21 @@ export default function App() {
                         )}
                       </div>
 
-                      <div className="relative">
+                      <div className="relative pt-4 pb-2">
                         <input
                           type="text"
                           value={chatInput}
                           onChange={(e) => setChatInput(e.target.value)}
                           onKeyDown={(e) => e.key === 'Enter' && handleAiChat()}
                           placeholder="向星空提问..."
-                          className="w-full bg-white/5 border border-white/10 rounded-2xl py-3 pl-4 pr-12 text-sm focus:ring-1 focus:ring-blue-500/50 outline-none"
+                          className="w-full bg-transparent border-none py-4 pl-2 pr-12 text-base font-light focus:ring-0 outline-none placeholder:opacity-20"
                         />
                         <button 
                           onClick={handleAiChat}
                           disabled={isAiLoading}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-blue-400 hover:text-blue-300 transition-colors disabled:opacity-20"
+                          className="absolute right-0 top-1/2 -translate-y-1/2 p-2 text-blue-400 hover:text-blue-300 transition-colors disabled:opacity-20"
                         >
-                          <Send size={18} />
+                          <Send size={22} />
                         </button>
                       </div>
                     </div>
