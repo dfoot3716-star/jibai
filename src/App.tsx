@@ -602,37 +602,72 @@ export default function App() {
   const fetchAvailableModels = async () => {
     setIsFetchingModels(true);
     try {
-      const apiKey = customApiKey || process.env.GEMINI_API_KEY;
-      const baseUrl = customApiUrl || (customApiProtocol === 'gemini' ? "https://generativelanguage.googleapis.com" : "https://api.openai.com/v1");
+      const apiKey = (customApiKey || process.env.GEMINI_API_KEY || '').trim();
+      let baseUrl = (customApiUrl || '').trim().replace(/\/+$/, ''); // 去重尾部斜杠
       
       if (!apiKey) throw new Error("尚未配置 API 密钥");
 
       if (customApiProtocol === 'gemini') {
-        const url = `${baseUrl}/v1beta/models?key=${apiKey}`;
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
-        const data = await resp.json();
-        // Filter for generation models
-        const models = data.models
-          .filter((m: any) => m.supportedGenerationMethods.includes('generateContent'))
-          .map((m: any) => m.name.replace('models/', ''));
-        if (models.length > 0) setAvailableModels(prev => Array.from(new Set([...prev, ...models])));
-      } else {
-        const url = `${baseUrl}/models`;
+        const base = baseUrl || "https://generativelanguage.googleapis.com";
+        // 自动处理路径版本，默认使用 v1beta
+        const hasVersion = base.includes('/v1beta') || base.includes('/v1');
+        const url = `${base}${hasVersion ? '' : '/v1beta'}/models?key=${apiKey}`;
+        
         const resp = await fetch(url, {
           headers: {
-            'Authorization': `Bearer ${apiKey}`
+            'x-goog-api-key': apiKey, // 增加 Header 认证支持（部分代理需要）
           }
         });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+        
+        if (!resp.ok) {
+          let errorDetail = resp.statusText;
+          if (resp.status === 401) errorDetail = "密钥无效或无权列出模型。如果是第三方代理，请检查 API 地址是否包含 /v1beta";
+          if (resp.status === 403) errorDetail = "API Key 权限受限或 IP 已被封禁";
+          throw new Error(`HTTP ${resp.status}: ${errorDetail}`);
+        }
+        
         const data = await resp.json();
-        const models = data.data.map((m: any) => m.id);
-        if (models.length > 0) setAvailableModels(prev => Array.from(new Set([...prev, ...models])));
+        const models = data.models
+          ?.filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
+          .map((m: any) => m.name.replace('models/', '')) || [];
+          
+        if (models.length > 0) {
+          setAvailableModels(prev => Array.from(new Set([...prev, ...models])));
+        } else {
+          throw new Error("未能获取到有效的生成模型列表");
+        }
+      } else {
+        // OpenAI 兼容协议
+        const base = baseUrl || 'https://api.openai.com/v1';
+        // 确保 OpenAI 路径包含 /models，通常在 base 后面
+        const url = `${base}/models`;
+        
+        const resp = await fetch(url, {
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (!resp.ok) {
+          let errorDetail = resp.statusText;
+          if (resp.status === 401) errorDetail = "密钥无效或代理地址错误。请检查 API 地址是否填写正确（通常需包含 /v1）";
+          throw new Error(`HTTP ${resp.status}: ${errorDetail}`);
+        }
+        
+        const data = await resp.json();
+        const models = data.data?.map((m: any) => m.id) || [];
+        
+        if (models.length > 0) {
+          setAvailableModels(prev => Array.from(new Set([...prev, ...models])));
+        } else {
+          throw new Error("服务器返回的模型列表为空");
+        }
       }
       playSound('click');
     } catch (error: any) {
       console.error("Fetch Models Error:", error);
-      alert(`无法获取模型列表: ${error.message}`);
+      alert(`无法获取模型列表:\n${error.message}`);
     } finally {
       setIsFetchingModels(false);
     }
