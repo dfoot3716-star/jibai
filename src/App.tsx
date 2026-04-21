@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import React, { Component, useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence, useMotionValue, useTransform } from 'motion/react';
 import { 
   Plus, 
   Check, 
@@ -22,7 +22,8 @@ import {
   LogIn,
   Sparkles,
   Palette,
-  Camera
+  Camera,
+  Trash2
 } from 'lucide-react';
 import { 
   format, 
@@ -193,9 +194,16 @@ function useLocalStorage<T>(key: string, initialValue: T) {
 }
 
 // --- Sound Engine ---
+let audioCtx: AudioContext | null = null;
 const playSound = (type: 'add' | 'complete' | 'click') => {
   try {
-    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+    
     const oscillator = audioCtx.createOscillator();
     const gainNode = audioCtx.createGain();
 
@@ -283,8 +291,17 @@ const Background = ({ time }: { time: Date }) => {
 
 
 // --- Error Boundary ---
-class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: Error | null }> {
-  constructor(props: { children: React.ReactNode }) {
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false, error: null };
   }
@@ -315,6 +332,72 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
     return this.props.children;
   }
 }
+
+// --- Task Item Component ---
+interface TaskItemProps {
+  task: Task;
+  isNight: boolean;
+  toggleTask: (id: string) => void;
+  deleteTask: (id: string) => void;
+}
+
+const TaskItem = ({ task, isNight, toggleTask, deleteTask }: TaskItemProps) => {
+  const x = useMotionValue(0);
+  const opacity = useTransform(x, [-70, -20, 0], [1, 0, 0]);
+  const scale = useTransform(x, [-70, -20, 0], [1, 0.8, 0.5]);
+
+  return (
+    <div className="relative overflow-visible group">
+      {/* Delete Action (Hidden behind) */}
+      <motion.div 
+        style={{ opacity, scale }}
+        className="absolute right-0 top-0 bottom-0 flex items-center pr-1 z-0"
+      >
+        <button 
+          onClick={() => deleteTask(task.id)}
+          className={cn(
+            "h-[80%] aspect-square rounded-2xl flex items-center justify-center transition-all active:scale-90",
+            isNight ? "bg-red-400/10 text-red-400/40" : "bg-red-500/5 text-red-500/30"
+          )}
+          title="删除"
+        >
+          <Trash2 size={18} />
+        </button>
+      </motion.div>
+
+      <motion.div
+        layout
+        drag="x"
+        style={{ x }}
+        dragConstraints={{ left: -70, right: 0 }}
+        dragElastic={0.1}
+        className={cn(
+          "flex items-center gap-4 bg-transparent z-10 relative py-1 cursor-grab active:cursor-grabbing",
+          task.completed && "opacity-40"
+        )}
+      >
+        <button 
+          onClick={() => toggleTask(task.id)}
+          className={cn(
+            "flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all",
+            task.completed ? "bg-blue-500 border-blue-500" : "border-blue-400/30"
+          )}
+        >
+          {task.completed && <Check size={14} className="text-white" />}
+        </button>
+        
+        <div className="flex-1">
+          <p className={cn(
+            "text-lg font-light transition-all",
+            task.completed && "line-through"
+          )}>
+            {task.text}
+          </p>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
@@ -349,7 +432,16 @@ export default function App() {
   // Profile State
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [isAvatarLoading, setIsAvatarLoading] = useState(false);
-  const [userProfile, setUserProfile] = useState<{ photoURL?: string } | null>(null);
+  const [userProfile, setUserProfile] = useState<{ photoURL?: string, displayName?: string } | null>(null);
+  const [customApiKey, setCustomApiKey] = useLocalStorage<string>('custom_gemini_api_key', '');
+  const [customApiUrl, setCustomApiUrl] = useLocalStorage<string>('custom_gemini_api_url', '');
+  const [customApiModel, setCustomApiModel] = useLocalStorage<string>('custom_gemini_api_model', 'gemini-3-flash-preview');
+  const [customApiProtocol, setCustomApiProtocol] = useLocalStorage<'gemini' | 'openai'>('custom_api_protocol', 'gemini');
+  const [showApiConfig, setShowApiConfig] = useState(false);
+  const [isApiTesting, setIsApiTesting] = useState(false);
+  const [apiTestResult, setApiTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [availableModels, setAvailableModels] = useState<string[]>(['gemini-3-flash-preview', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gpt-4o', 'gpt-3.5-turbo', 'claude-3-sonnet-20240229']);
+  const [isFetchingModels, setIsFetchingModels] = useState(false);
 
   // Local Storage for Migration
   const [localTasks] = useLocalStorage<Task[]>('tasks', []);
@@ -403,7 +495,7 @@ export default function App() {
     const userRef = doc(db, 'users', user.uid);
     const unsubscribeUser = onSnapshot(userRef, (snapshot) => {
       if (snapshot.exists()) {
-        setUserProfile(snapshot.data());
+        setUserProfile(snapshot.data() as { photoURL?: string, displayName?: string });
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
@@ -455,6 +547,94 @@ export default function App() {
       await signOut(auth);
     } catch (error) {
       console.error("Logout Error:", error);
+    }
+  };
+
+  const testApiConnection = async () => {
+    setIsApiTesting(true);
+    setApiTestResult(null);
+    try {
+      const apiKey = customApiKey || process.env.GEMINI_API_KEY;
+      const baseUrl = customApiUrl || undefined;
+      const modelName = customApiModel || "gemini-3-flash-preview";
+      const protocol = customApiProtocol;
+
+      if (!apiKey) throw new Error("尚未配置 API 密钥");
+
+      if (protocol === 'gemini') {
+        const ai = new GoogleGenAI({ apiKey } as any);
+        const model = (ai as any).getGenerativeModel({ model: modelName }, { baseUrl } as any);
+        const result = await model.generateContent("你好，请回复“连接成功”");
+        const response = await result.response;
+        if (response.text()) {
+          setApiTestResult({ success: true, message: "连接成功" });
+        } else {
+          throw new Error("响应内容为空");
+        }
+      } else {
+        // OpenAI Compatible via Fetch
+        const url = `${baseUrl || 'https://api.openai.com/v1'}/chat/completions`;
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: modelName,
+            messages: [{ role: 'user', content: '你好，简短回复即可' }],
+            max_tokens: 10
+          })
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({ error: { message: resp.statusText } }));
+          throw new Error(err.error?.message || `HTTP ${resp.status}`);
+        }
+        setApiTestResult({ success: true, message: "连接成功" });
+      }
+    } catch (error: any) {
+      setApiTestResult({ success: false, message: error.message || "连接失败" });
+    } finally {
+      setIsApiTesting(false);
+    }
+  };
+
+  const fetchAvailableModels = async () => {
+    setIsFetchingModels(true);
+    try {
+      const apiKey = customApiKey || process.env.GEMINI_API_KEY;
+      const baseUrl = customApiUrl || (customApiProtocol === 'gemini' ? "https://generativelanguage.googleapis.com" : "https://api.openai.com/v1");
+      
+      if (!apiKey) throw new Error("尚未配置 API 密钥");
+
+      if (customApiProtocol === 'gemini') {
+        const url = `${baseUrl}/v1beta/models?key=${apiKey}`;
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+        const data = await resp.json();
+        // Filter for generation models
+        const models = data.models
+          .filter((m: any) => m.supportedGenerationMethods.includes('generateContent'))
+          .map((m: any) => m.name.replace('models/', ''));
+        if (models.length > 0) setAvailableModels(prev => Array.from(new Set([...prev, ...models])));
+      } else {
+        const url = `${baseUrl}/models`;
+        const resp = await fetch(url, {
+          headers: {
+            'Authorization': `Bearer ${apiKey}`
+          }
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+        const data = await resp.json();
+        const models = data.data.map((m: any) => m.id);
+        if (models.length > 0) setAvailableModels(prev => Array.from(new Set([...prev, ...models])));
+      }
+      playSound('click');
+    } catch (error: any) {
+      console.error("Fetch Models Error:", error);
+      alert(`无法获取模型列表: ${error.message}`);
+    } finally {
+      setIsFetchingModels(false);
     }
   };
 
@@ -510,9 +690,14 @@ export default function App() {
     if (!user) return;
     setIsInsightLoading(true);
     setShowInsightModal(true);
+    setWeeklyInsight(null);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-      const model = "gemini-3-flash-preview";
+      const apiKey = customApiKey || process.env.GEMINI_API_KEY;
+      const baseUrl = customApiUrl || undefined;
+      const modelName = customApiModel || "gemini-3-flash-preview";
+      const protocol = customApiProtocol;
+
+      if (!apiKey) throw new Error("API Key not found");
       
       const recentTasks = tasks.slice(-20).map(t => `${t.text} (${t.completed ? '已完成' : '未完成'})`).join('\n');
       const recentDiaries = diaries.slice(-5).map(d => d.content).join('\n\n');
@@ -531,11 +716,31 @@ export default function App() {
       3. 一个关于下周的小建议，字数控制在200字以内。
       请使用中文，语气要像老朋友一样温暖。`;
 
-      const response = await ai.models.generateContent({
-        model,
-        contents: prompt,
-      });
-      setWeeklyInsight(response.text || "星空有些模糊，请稍后再试。");
+      let aiText = "";
+      if (protocol === 'gemini') {
+        const ai = new GoogleGenAI({ apiKey } as any);
+        const model = (ai as any).getGenerativeModel({ model: modelName }, { baseUrl } as any);
+        const result = await model.generateContent(prompt);
+        const response = await result.response;
+        aiText = response.text() || "星空有些模糊，请稍后再试。";
+      } else {
+        const url = `${baseUrl || 'https://api.openai.com/v1'}/chat/completions`;
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: modelName,
+            messages: [{ role: 'user', content: prompt }]
+          })
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        aiText = data.choices[0].message.content;
+      }
+      setWeeklyInsight(aiText);
     } catch (error) {
       console.error("Insight Error:", error);
       setWeeklyInsight("连接星空失败，请检查网络。");
@@ -555,10 +760,11 @@ export default function App() {
       id: generateId()
     };
     try {
-      await setDoc(doc(db, 'tasks', newTask.id), newTask);
-      setNewTaskText('');
+      // Optimistic UI close
       setShowAddModal(false);
+      setNewTaskText('');
       playSound('add');
+      await setDoc(doc(db, 'tasks', newTask.id), newTask);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `tasks/${newTask.id}`);
     }
@@ -673,23 +879,60 @@ export default function App() {
         await setDoc(doc(db, 'diaries', entry.id), { ...entry, chatHistory: newHistory });
       }
 
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-      const model = ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: newHistory.map(h => ({ role: h.role, parts: [{ text: h.text }] })),
-        config: {
-          systemInstruction: `你是一个温柔、富有同理心的日记助手。用户正在写关于 ${dateKey} 的日记。日记内容是：“${diaryContent}”。请根据日记内容和用户的提问，提供有深度的反馈、鼓励或建议。保持简洁、诗意且温暖。`,
-        }
-      });
+      const apiKey = customApiKey || process.env.GEMINI_API_KEY;
+      const baseUrl = customApiUrl || undefined;
+      const modelName = customApiModel || "gemini-3-flash-preview";
+      const protocol = customApiProtocol;
 
-      const response = await model;
-      const aiText = response.text || "抱歉，我现在无法回应。";
+      if (!apiKey) throw new Error("API Key not found");
+
+      let aiText = "";
+      const systemInstruction = `你是一个温柔、富有同理心的日记助手。用户正在写关于 ${dateKey} 的日记。日记内容是：“${diaryContent}”。请根据日记内容和用户的提问，提供有深度的反馈、鼓励或建议。保持简洁、诗意且温暖。`;
+
+      if (protocol === 'gemini') {
+        const ai = new GoogleGenAI({ apiKey } as any);
+        const model = (ai as any).getGenerativeModel({ 
+          model: modelName,
+          systemInstruction,
+        }, { baseUrl } as any);
+
+        const result = await model.generateContent({
+          contents: newHistory.map(h => ({ role: h.role === 'model' ? 'model' : 'user', parts: [{ text: h.text }] })),
+        });
+
+        const response = await result.response;
+        aiText = response.text() || "抱歉，我现在无法回应。";
+      } else {
+        const url = `${baseUrl || 'https://api.openai.com/v1'}/chat/completions`;
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: modelName,
+            messages: [
+              { role: 'system', content: systemInstruction },
+              ...newHistory.map(h => ({ role: h.role === 'model' ? 'assistant' : 'user', content: h.text }))
+            ]
+          })
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        aiText = data.choices[0].message.content;
+      }
       
       const finalHistory = [...newHistory, { role: 'model' as const, text: aiText }];
       await updateDoc(doc(db, 'diaries', entry.id), { chatHistory: finalHistory });
     } catch (error) {
       console.error('AI Chat Error:', error);
-      const errorMsg = { role: 'model' as const, text: "连接星空失败，请检查 GitHub Secrets 中是否配置了 GEMINI_API_KEY。" };
+      const errorMsg = { 
+        role: 'model' as const, 
+        text: customApiKey 
+          ? "连接星空失败，请检查你的 API Key 是否有效，或检查网络连接。" 
+          : "连接星空失败，未在该克隆应用中配置 GEMINI_API_KEY。请在设置中输入你的私人 API Key。" 
+      };
       if (entry.id) {
         try {
           await updateDoc(doc(db, 'diaries', entry.id), { chatHistory: [...newHistory, errorMsg] });
@@ -939,40 +1182,13 @@ export default function App() {
                             {priorityTasks
                               .sort((a, b) => (a.completed === b.completed ? 0 : a.completed ? 1 : -1))
                               .map(task => (
-                                <motion.div
-                                  layout
-                                  key={task.id}
-                                  className={cn(
-                                    "flex items-center gap-4 group transition-opacity",
-                                    task.completed && "opacity-40"
-                                  )}
-                                >
-                                  <button 
-                                    onClick={() => toggleTask(task.id)}
-                                    className={cn(
-                                      "flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all",
-                                      task.completed ? "bg-blue-500 border-blue-500" : "border-blue-400/30"
-                                    )}
-                                  >
-                                    {task.completed && <Check size={14} className="text-white" />}
-                                  </button>
-                                  
-                                  <div className="flex-1">
-                                    <p className={cn(
-                                      "text-lg font-light transition-all",
-                                      task.completed && "line-through"
-                                    )}>
-                                      {task.text}
-                                    </p>
-                                  </div>
-
-                                  <button 
-                                    onClick={() => deleteTask(task.id)}
-                                    className="opacity-0 group-hover:opacity-40 hover:opacity-100 transition-opacity"
-                                  >
-                                    <Plus size={14} className="rotate-45" />
-                                  </button>
-                                </motion.div>
+                                <TaskItem 
+                                  key={task.id} 
+                                  task={task} 
+                                  isNight={isNight} 
+                                  toggleTask={toggleTask} 
+                                  deleteTask={deleteTask} 
+                                />
                               ))}
                           </div>
                         </div>
@@ -1065,11 +1281,11 @@ export default function App() {
               <AnimatePresence>
                 {isChatting && (
                   <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 10 }}
+                    initial={{ opacity: 0, scale: 1.05, filter: "blur(10px)" }}
+                    animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+                    exit={{ opacity: 0, scale: 1.05, filter: "blur(10px)" }}
                     transition={{ 
-                      duration: 0.5, 
+                      duration: 0.6, 
                       ease: [0.22, 1, 0.36, 1]
                     }}
                     className={cn(
@@ -1077,7 +1293,12 @@ export default function App() {
                       isNight ? "bg-[#020617]" : "bg-[#f8fafc]"
                     )}
                   >
-                    <div className="flex justify-between items-center mb-12">
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.2, duration: 0.5 }}
+                      className="flex justify-between items-center mb-12"
+                    >
                       <div className="flex flex-col">
                         <p className="text-[10px] uppercase tracking-[0.5em] opacity-40 font-bold mb-2">星空对话</p>
                         <h2 className="text-2xl font-serif italic text-white/90">{format(selectedDate, 'MMMM do')}</h2>
@@ -1088,7 +1309,7 @@ export default function App() {
                       >
                         <ChevronLeft size={24} />
                       </button>
-                    </div>
+                    </motion.div>
                     
                     <div className="flex-1 overflow-y-auto space-y-6 mb-8 custom-scrollbar pr-4">
                       {currentDiary.chatHistory.length === 0 && (
@@ -1098,7 +1319,10 @@ export default function App() {
                         </div>
                       )}
                       {currentDiary.chatHistory.map((msg, i) => (
-                        <div 
+                        <motion.div 
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.3 + (i * 0.05), duration: 0.4 }}
                           key={i} 
                           className={cn(
                             "max-w-[85%] md:max-w-[70%] p-6 rounded-[2.5rem] text-base leading-relaxed shadow-2xl",
@@ -1108,7 +1332,7 @@ export default function App() {
                           )}
                         >
                           {msg.text}
-                        </div>
+                        </motion.div>
                       ))}
                       {isAiLoading && (
                         <div className="mr-auto glass p-6 rounded-[2.5rem] rounded-tl-none flex gap-2 border border-white/5">
@@ -1119,7 +1343,12 @@ export default function App() {
                       )}
                     </div>
 
-                    <div className="relative max-w-4xl mx-auto w-full">
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.4, duration: 0.5 }}
+                      className="relative max-w-4xl mx-auto w-full"
+                    >
                       <div className="absolute inset-0 bg-blue-500/5 blur-3xl rounded-full -z-10" />
                       <input
                         type="text"
@@ -1137,7 +1366,7 @@ export default function App() {
                       >
                         <Send size={24} />
                       </button>
-                    </div>
+                    </motion.div>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -1250,80 +1479,245 @@ export default function App() {
                 className="max-w-sm w-full glass rounded-[3rem] p-10 relative overflow-hidden"
               >
                 <div className="flex justify-between items-center mb-10">
-                  <h2 className="text-2xl font-serif italic">个人中心</h2>
+                  <div className="flex items-center gap-3">
+                    {showApiConfig && (
+                      <button 
+                        onClick={() => setShowApiConfig(false)}
+                        className="p-2 -ml-2 opacity-40 hover:opacity-100 transition-opacity"
+                      >
+                        <ChevronLeft size={24} />
+                      </button>
+                    )}
+                    <h2 className="text-2xl font-serif italic">{showApiConfig ? 'API 设置' : '个人中心'}</h2>
+                  </div>
                   <button 
-                    onClick={() => setShowProfileModal(false)}
+                    onClick={() => {
+                      setShowProfileModal(false);
+                      setShowApiConfig(false);
+                    }}
                     className="p-2 opacity-40 hover:opacity-100 transition-opacity"
                   >
                     <Plus size={24} className="rotate-45" />
                   </button>
                 </div>
 
-                <div className="flex flex-col items-center text-center space-y-6">
-                  <div className="relative group cursor-pointer" onClick={() => document.getElementById('avatar-upload')?.click()}>
-                    <div className={cn(
-                      "relative w-24 h-24 rounded-full border-2 border-white/10 p-1 transition-all group-hover:border-blue-400/50",
-                      isAvatarLoading && "opacity-50"
-                    )}>
-                      <img 
-                        src={userProfile?.photoURL || user.photoURL || `https://ui-avatars.com/api/?name=${userProfile?.displayName || user.displayName || 'User'}`} 
-                        alt="Avatar" 
-                        className="w-full h-full rounded-full object-cover"
-                        referrerPolicy="no-referrer"
-                      />
-                      {isAvatarLoading ? (
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                        </div>
-                      ) : (
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Camera size={24} className="text-white" />
-                        </div>
-                      )}
-                    </div>
-                    <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center border-2 border-[#1e1e1e]">
-                      <Star size={12} className="text-white" />
-                    </div>
-                    <input 
-                      type="file" 
-                      id="avatar-upload" 
-                      className="hidden" 
-                      accept="image/*" 
-                      onChange={handleAvatarChange}
-                      disabled={isAvatarLoading}
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <h3 className="text-xl font-medium">{userProfile?.displayName || user.displayName || '星空旅者'}</h3>
-                    <p className="text-xs opacity-40 font-mono tracking-wider">{user.email}</p>
-                  </div>
-
-                  <div className="w-full grid grid-cols-2 gap-4 pt-4">
-                    <div className="glass rounded-2xl p-4 flex flex-col items-center gap-1">
-                      <span className="text-lg font-serif italic">{tasks.length}</span>
-                      <span className="text-[10px] opacity-40 uppercase tracking-widest">计划总数</span>
-                    </div>
-                    <div className="glass rounded-2xl p-4 flex flex-col items-center gap-1">
-                      <span className="text-lg font-serif italic">{diaries.length}</span>
-                      <span className="text-[10px] opacity-40 uppercase tracking-widest">日记篇数</span>
-                    </div>
-                  </div>
-
-                  <div className="w-full pt-8">
-                    <button 
-                      onClick={() => {
-                        playSound('click');
-                        setShowProfileModal(false);
-                        logout();
-                      }}
-                      className="w-full flex items-center justify-center gap-3 py-4 bg-red-500/10 text-red-400 border border-red-500/20 rounded-2xl hover:bg-red-500/20 transition-all active:scale-95 group"
+                <AnimatePresence mode="wait">
+                  {!showApiConfig ? (
+                    <motion.div 
+                      key="profile-main"
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -20 }}
+                      className="flex flex-col items-center text-center space-y-6"
                     >
-                      <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" />
-                      <span className="text-sm tracking-widest font-medium">退出登录</span>
-                    </button>
-                  </div>
-                </div>
+                      <div className="relative group cursor-pointer" onClick={() => document.getElementById('avatar-upload')?.click()}>
+                        <div className={cn(
+                          "relative w-24 h-24 rounded-full border-2 border-white/10 p-1 transition-all group-hover:border-blue-400/50",
+                          isAvatarLoading && "opacity-50"
+                        )}>
+                          <img 
+                            src={userProfile?.photoURL || user.photoURL || `https://ui-avatars.com/api/?name=${userProfile?.displayName || user.displayName || 'User'}`} 
+                            alt="Avatar" 
+                            className="w-full h-full rounded-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                          {isAvatarLoading ? (
+                            <div className="absolute inset-0 flex items-center justify-center">
+                              <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                            </div>
+                          ) : (
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Camera size={24} className="text-white" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center border-2 border-[#1e1e1e]">
+                          <Star size={12} className="text-white" />
+                        </div>
+                        <input 
+                          type="file" 
+                          id="avatar-upload" 
+                          className="hidden" 
+                          accept="image/*" 
+                          onChange={handleAvatarChange}
+                          disabled={isAvatarLoading}
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <h3 className="text-xl font-medium">{userProfile?.displayName || user.displayName || '星空旅者'}</h3>
+                        <p className="text-xs opacity-40 font-mono tracking-wider">{user.email}</p>
+                      </div>
+
+                      <div className="w-full grid grid-cols-2 gap-4 pt-4">
+                        <div className="glass rounded-2xl p-4 flex flex-col items-center gap-1">
+                          <span className="text-lg font-serif italic">{tasks.length}</span>
+                          <span className="text-[10px] opacity-40 uppercase tracking-widest">计划总数</span>
+                        </div>
+                        <div className="glass rounded-2xl p-4 flex flex-col items-center gap-1">
+                          <span className="text-lg font-serif italic">{diaries.length}</span>
+                          <span className="text-[10px] opacity-40 uppercase tracking-widest">日记篇数</span>
+                        </div>
+                      </div>
+
+                      <div className="w-full pt-4">
+                        <button 
+                          onClick={() => {
+                            playSound('click');
+                            setShowApiConfig(true);
+                          }}
+                          className="w-full flex items-center justify-between p-5 glass rounded-2xl hover:bg-white/5 transition-all group"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 bg-blue-500/10 text-blue-400 rounded-lg">
+                              <Settings size={18} />
+                            </div>
+                            <span className="text-sm font-medium">星空对话 API 设置</span>
+                          </div>
+                          <ChevronRight size={18} className="opacity-20 group-hover:opacity-100 group-hover:translate-x-1 transition-all" />
+                        </button>
+                      </div>
+
+                      <div className="w-full pt-8">
+                        <button 
+                          onClick={() => {
+                            playSound('click');
+                            setShowProfileModal(false);
+                            logout();
+                          }}
+                          className="w-full flex items-center justify-center gap-3 py-4 bg-red-500/10 text-red-400 border border-red-500/20 rounded-2xl hover:bg-red-500/20 transition-all active:scale-95 group"
+                        >
+                          <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" />
+                          <span className="text-sm tracking-widest font-medium">退出登录</span>
+                        </button>
+                      </div>
+                    </motion.div>
+                  ) : (
+                    <motion.div 
+                      key="api-config"
+                      initial={{ opacity: 0, x: 20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 20 }}
+                      className="space-y-6"
+                    >
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <p className="text-[9px] uppercase tracking-[0.2em] font-bold opacity-30 px-1">API 协议</p>
+                          <div className="flex gap-2 p-1 glass rounded-xl">
+                            {['gemini', 'openai'].map((p) => (
+                              <button
+                                key={p}
+                                onClick={() => setCustomApiProtocol(p as any)}
+                                className={cn(
+                                  "flex-1 py-2 text-[10px] rounded-lg transition-all capitalize",
+                                  customApiProtocol === p ? "bg-blue-500 text-white" : "opacity-40 hover:opacity-100"
+                                )}
+                              >
+                                {p === 'gemini' ? 'Gemini (SDK)' : 'OpenAI 兼容'}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <p className="text-[9px] uppercase tracking-[0.2em] font-bold opacity-30 px-1">API 地址</p>
+                          <input 
+                            type="text"
+                            placeholder={customApiProtocol === 'gemini' ? "https://generativelanguage.googleapis.com" : "https://api.openai.com/v1"}
+                            value={customApiUrl}
+                            onChange={(e) => setCustomApiUrl(e.target.value)}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-xs focus:ring-1 focus:ring-blue-500/50 outline-none transition-all"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <p className="text-[9px] uppercase tracking-[0.2em] font-bold opacity-30 px-1">API 密钥 (Key)</p>
+                          <input 
+                            type="password"
+                            placeholder="输入 API Key..."
+                            value={customApiKey}
+                            onChange={(e) => setCustomApiKey(e.target.value)}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-xs focus:ring-1 focus:ring-blue-500/50 outline-none transition-all"
+                          />
+                        </div>
+
+                        <div className="space-y-2 relative">
+                          <p className="text-[9px] uppercase tracking-[0.2em] font-bold opacity-30 px-1 flex justify-between items-center">
+                            <span>模型选择</span>
+                            <button 
+                              onClick={fetchAvailableModels}
+                              disabled={isFetchingModels}
+                              className="flex items-center gap-1 text-blue-400/60 hover:text-blue-400 transition-colors py-1 px-2 -mr-2"
+                              title="从服务器刷新模型列表"
+                            >
+                              {isFetchingModels ? (
+                                <div className="w-2 h-2 border border-blue-400/30 border-t-blue-400 rounded-full animate-spin" />
+                              ) : (
+                                <Plus size={10} className="rotate-45 scale-125" /> 
+                                /* Note: Using Plus rotated to look like a small refresh or just an icon */
+                              )}
+                              <span className="text-[8px] uppercase tracking-wider italic normal-case">读取列表</span>
+                            </button>
+                          </p>
+                          <div className="relative">
+                            <input 
+                              type="text"
+                              list="api-models"
+                              value={customApiModel}
+                              onChange={(e) => setCustomApiModel(e.target.value)}
+                              className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-xs focus:ring-1 focus:ring-blue-500/50 outline-none transition-all"
+                            />
+                            <datalist id="api-models">
+                              {availableModels.map(m => (
+                                <option key={m} value={m} />
+                              ))}
+                            </datalist>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="pt-4 space-y-3">
+                        <button 
+                          onClick={testApiConnection}
+                          disabled={isApiTesting}
+                          className={cn(
+                            "w-full py-3 rounded-xl text-xs font-medium border transition-all flex items-center justify-center gap-2",
+                            apiTestResult?.success 
+                              ? "bg-green-500/10 border-green-500/30 text-green-400" 
+                              : "bg-white/5 border-white/10 text-white hover:bg-white/10"
+                          )}
+                        >
+                          {isApiTesting ? (
+                            <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          ) : (
+                            <Sparkles size={14} />
+                          )}
+                          {apiTestResult?.success ? "测试成功" : "测试连接"}
+                        </button>
+
+                        <button 
+                          onClick={() => {
+                            playSound('click');
+                            setShowApiConfig(false);
+                          }}
+                          className="w-full py-4 bg-blue-500 text-white rounded-2xl text-sm font-medium shadow-lg shadow-blue-500/20 active:scale-95 transition-all"
+                        >
+                          保存并返回
+                        </button>
+                        
+                        {apiTestResult && !apiTestResult.success && (
+                          <p className="text-[10px] text-red-400 text-center px-4 animate-shake">
+                            {apiTestResult.message}
+                          </p>
+                        )}
+                      </div>
+
+                      <p className="text-[10px] opacity-20 px-1 leading-relaxed text-center italic">
+                        配置将保存在本地浏览器中，不会上传到云端。
+                      </p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </motion.div>
             </motion.div>
           )}
