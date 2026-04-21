@@ -23,7 +23,9 @@ import {
   Sparkles,
   Palette,
   Camera,
-  Trash2
+  Trash2,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { 
   format, 
@@ -442,6 +444,7 @@ export default function App() {
   const [apiTestResult, setApiTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>(['gemini-3-flash-preview', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gpt-4o', 'gpt-3.5-turbo', 'claude-3-sonnet-20240229']);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
+  const [themePreference, setThemePreference] = useLocalStorage<'light' | 'dark' | 'auto'>('theme_preference', 'auto');
 
   // Local Storage for Migration
   const [localTasks] = useLocalStorage<Task[]>('tasks', []);
@@ -980,12 +983,26 @@ export default function App() {
     }
   };
 
-  const isNight = currentTime.getHours() >= 20 || currentTime.getHours() < 5;
+  const displayTime = useMemo(() => {
+    if (themePreference === 'dark') {
+      const d = new Date(currentTime);
+      d.setHours(20, 0, 0, 0); // 参考晚上八点
+      return d;
+    }
+    if (themePreference === 'light') {
+      const d = new Date(currentTime);
+      d.setHours(12, 0, 0, 0); // 参考中午十二点
+      return d;
+    }
+    return currentTime;
+  }, [themePreference, currentTime]);
+
+  const isNight = displayTime.getHours() >= 20 || displayTime.getHours() < 5;
 
   return (
     <ErrorBoundary>
       <div className={cn("h-screen flex flex-col items-center justify-center p-4 md:p-8 overflow-hidden transition-colors duration-1000", isNight ? "text-white" : "text-slate-900")}>
-        <Background time={currentTime} />
+        <Background time={displayTime} />
 
       <AnimatePresence mode="wait">
         {showIntro && (
@@ -1595,7 +1612,7 @@ export default function App() {
                         </div>
                       </div>
 
-                      <div className="w-full pt-4">
+                      <div className="w-full pt-4 space-y-3">
                         <button 
                           onClick={() => {
                             playSound('click');
@@ -1611,6 +1628,34 @@ export default function App() {
                           </div>
                           <ChevronRight size={18} className="opacity-20 group-hover:opacity-100 group-hover:translate-x-1 transition-all" />
                         </button>
+
+                        <div className="flex items-center gap-2 p-1.5 glass rounded-2xl">
+                          {[
+                            { id: 'light', icon: Sun, label: '白昼' },
+                            { id: 'dark', icon: Moon, label: '星夜' },
+                            { id: 'auto', icon: Sparkles, label: '随行' }
+                          ].map((t) => {
+                            const Icon = t.icon;
+                            return (
+                              <button
+                                key={t.id}
+                                onClick={() => {
+                                  setThemePreference(t.id as any);
+                                  playSound('click');
+                                }}
+                                className={cn(
+                                  "flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all text-xs font-medium",
+                                  themePreference === t.id 
+                                    ? "bg-blue-500 text-white shadow-lg" 
+                                    : "opacity-40 hover:opacity-100"
+                                )}
+                              >
+                                <Icon size={14} />
+                                <span>{t.label}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
 
                       <div className="w-full pt-8">
@@ -1637,15 +1682,23 @@ export default function App() {
                     >
                       <div className="space-y-4">
                         <div className="space-y-2">
-                          <p className="text-[9px] uppercase tracking-[0.2em] font-bold opacity-30 px-1">API 协议</p>
-                          <div className="flex gap-2 p-1 glass rounded-xl">
+                          <p className={cn(
+                            "text-[10px] uppercase tracking-[0.2em] font-bold px-1",
+                            isNight ? "opacity-60 text-white" : "text-blue-950/40"
+                          )}>API 协议</p>
+                          <div className={cn(
+                            "flex gap-2 p-1.5 glass rounded-xl border transition-colors",
+                            isNight ? "border-white/5" : "border-blue-900/10"
+                          )}>
                             {['gemini', 'openai'].map((p) => (
                               <button
                                 key={p}
                                 onClick={() => setCustomApiProtocol(p as any)}
                                 className={cn(
-                                  "flex-1 py-2 text-[10px] rounded-lg transition-all capitalize",
-                                  customApiProtocol === p ? "bg-blue-500 text-white" : "opacity-40 hover:opacity-100"
+                                  "flex-1 py-2 text-[11px] rounded-lg transition-all capitalize font-medium",
+                                  customApiProtocol === p 
+                                    ? "bg-blue-500 text-white shadow-lg shadow-blue-500/20" 
+                                    : isNight ? "opacity-40 hover:opacity-100 text-white" : "text-blue-900/40 hover:text-blue-900 hover:bg-blue-900/5"
                                 )}
                               >
                                 {p === 'gemini' ? 'Gemini (SDK)' : 'OpenAI 兼容'}
@@ -1655,43 +1708,69 @@ export default function App() {
                         </div>
 
                         <div className="space-y-2">
-                          <p className="text-[9px] uppercase tracking-[0.2em] font-bold opacity-30 px-1">API 地址</p>
+                          <p className={cn(
+                            "text-[10px] uppercase tracking-[0.2em] font-bold px-1",
+                            isNight ? "opacity-60 text-white" : "text-blue-950/40"
+                          )}>API 地址</p>
                           <input 
                             type="text"
                             placeholder={customApiProtocol === 'gemini' ? "https://generativelanguage.googleapis.com" : "https://api.openai.com/v1"}
                             value={customApiUrl}
                             onChange={(e) => setCustomApiUrl(e.target.value)}
-                            className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-xs focus:ring-1 focus:ring-blue-500/50 outline-none transition-all"
+                            className={cn(
+                              "w-full border rounded-xl py-3.5 px-4 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none transition-all",
+                              isNight 
+                                ? "bg-white/10 border-white/20 text-white placeholder:text-white/20" 
+                                : "bg-blue-900/5 border-blue-900/10 text-blue-950 placeholder:text-blue-900/20"
+                            )}
                           />
                         </div>
 
                         <div className="space-y-2">
-                          <p className="text-[9px] uppercase tracking-[0.2em] font-bold opacity-30 px-1">API 密钥 (Key)</p>
+                          <p className={cn(
+                            "text-[10px] uppercase tracking-[0.2em] font-bold px-1",
+                            isNight ? "opacity-60 text-white" : "text-blue-950/40"
+                          )}>API 密钥 (Key)</p>
                           <input 
                             type="password"
                             placeholder="输入 API Key..."
                             value={customApiKey}
                             onChange={(e) => setCustomApiKey(e.target.value)}
-                            className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-xs focus:ring-1 focus:ring-blue-500/50 outline-none transition-all"
+                            className={cn(
+                              "w-full border rounded-xl py-3.5 px-4 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none transition-all",
+                              isNight 
+                                ? "bg-white/10 border-white/20 text-white placeholder:text-white/20" 
+                                : "bg-blue-900/5 border-blue-900/10 text-blue-950 placeholder:text-blue-900/20"
+                            )}
                           />
                         </div>
 
                         <div className="space-y-2 relative">
-                          <p className="text-[9px] uppercase tracking-[0.2em] font-bold opacity-30 px-1 flex justify-between items-center">
+                          <p className={cn(
+                            "text-[10px] uppercase tracking-[0.2em] font-bold px-1 flex justify-between items-center",
+                            isNight ? "opacity-60 text-white" : "text-blue-950/40"
+                          )}>
                             <span>模型选择</span>
                             <button 
                               onClick={fetchAvailableModels}
                               disabled={isFetchingModels}
-                              className="flex items-center gap-1 text-blue-400/60 hover:text-blue-400 transition-colors py-1 px-2 -mr-2"
+                              className={cn(
+                                "flex items-center gap-1.5 transition-colors py-1 px-2 -mr-2 rounded-lg border active:scale-95",
+                                isNight 
+                                  ? "text-blue-400 hover:text-blue-200 bg-blue-500/10 border-blue-500/10" 
+                                  : "text-blue-600 hover:text-blue-800 bg-blue-600/5 border-blue-600/5"
+                              )}
                               title="从服务器刷新模型列表"
                             >
                               {isFetchingModels ? (
-                                <div className="w-2 h-2 border border-blue-400/30 border-t-blue-400 rounded-full animate-spin" />
+                                <div className={cn(
+                                  "w-2.5 h-2.5 border-2 rounded-full animate-spin",
+                                  isNight ? "border-blue-400/30 border-t-blue-400" : "border-blue-600/30 border-t-blue-600"
+                                )} />
                               ) : (
-                                <Plus size={10} className="rotate-45 scale-125" /> 
-                                /* Note: Using Plus rotated to look like a small refresh or just an icon */
+                                <Plus size={11} className="rotate-45 scale-125" /> 
                               )}
-                              <span className="text-[8px] uppercase tracking-wider italic normal-case">读取列表</span>
+                              <span className="text-[9px] uppercase tracking-wider font-bold">读取列表</span>
                             </button>
                           </p>
                           <div className="relative">
@@ -1700,7 +1779,12 @@ export default function App() {
                               list="api-models"
                               value={customApiModel}
                               onChange={(e) => setCustomApiModel(e.target.value)}
-                              className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-xs focus:ring-1 focus:ring-blue-500/50 outline-none transition-all"
+                              className={cn(
+                                "w-full border rounded-xl py-3.5 px-4 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none transition-all",
+                                isNight 
+                                  ? "bg-white/10 border-white/20 text-white" 
+                                  : "bg-blue-900/5 border-blue-900/10 text-blue-950"
+                              )}
                             />
                             <datalist id="api-models">
                               {availableModels.map(m => (
@@ -1708,6 +1792,36 @@ export default function App() {
                               ))}
                             </datalist>
                           </div>
+                          
+                          {availableModels.length > 0 && (
+                            <div className="mt-3 space-y-2">
+                              <p className={cn(
+                                "text-[9px] px-1 font-medium",
+                                isNight ? "opacity-60 text-white" : "text-blue-950/40"
+                              )}>已拉取模型 (点击选择):</p>
+                              <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-1 scrollbar-hide">
+                                {availableModels.map(m => (
+                                  <button
+                                    key={m}
+                                    onClick={() => {
+                                      setCustomApiModel(m);
+                                      playSound('click');
+                                    }}
+                                    className={cn(
+                                      "px-3 py-1.5 rounded-lg text-[10px] transition-all font-medium border",
+                                      customApiModel === m 
+                                        ? "bg-blue-500 text-white shadow-lg shadow-blue-500/30 border-blue-400" 
+                                        : isNight 
+                                          ? "bg-white/10 text-white hover:bg-white/20 border-white/10" 
+                                          : "bg-blue-900/5 text-blue-900 hover:bg-blue-900/10 border-blue-900/5"
+                                    )}
+                                  >
+                                    {m}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -1719,7 +1833,7 @@ export default function App() {
                             "w-full py-3 rounded-xl text-xs font-medium border transition-all flex items-center justify-center gap-2",
                             apiTestResult?.success 
                               ? "bg-green-500/10 border-green-500/30 text-green-400" 
-                              : "bg-white/5 border-white/10 text-white hover:bg-white/10"
+                              : isNight ? "bg-white/5 border-white/10 text-white hover:bg-white/10" : "bg-blue-900/5 border-blue-900/10 text-blue-900 hover:bg-blue-900/10"
                           )}
                         >
                           {isApiTesting ? (
