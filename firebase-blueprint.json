@@ -7,12 +7,19 @@
       "properties": {
         "id": { "type": "string" },
         "text": { "type": "string" },
-        "priority": { "type": "string", "enum": ["IMPORTANT_URGENT", "IMPORTANT_NOT_URGENT", "URGENT_NOT_IMPORTANT", "CASUAL"] },
         "completed": { "type": "boolean" },
         "createdAt": { "type": "number" },
-        "uid": { "type": "string", "description": "Owner's user ID" }
+        "uid": { "type": "string", "description": "Owner's user ID" },
+        "category": { "type": "string", "enum": ["WORK", "HEALTH", "PERSONAL", "LEARNING"] },
+        "pos": {
+          "type": "object",
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" }
+          }
+        }
       },
-      "required": ["id", "text", "priority", "completed", "createdAt", "uid"]
+      "required": ["id", "text", "completed", "createdAt", "uid", "category"]
     },
     "DiaryEntry": {
       "title": "DiaryEntry",

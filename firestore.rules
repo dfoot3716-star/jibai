@@ -7,10 +7,11 @@
 // Fields:
 //   - id: string (required) - unique task ID
 //   - text: string (required) - task description
-//   - priority: string (required) - enum: IMPORTANT_URGENT, IMPORTANT_NOT_URGENT, URGENT_NOT_IMPORTANT, CASUAL
 //   - completed: boolean (required) - completion status
 //   - createdAt: number (required) - timestamp
 //   - uid: string (required) - owner's user ID
+//   - category: string (required) - WORK, HEALTH, PERSONAL, LEARNING
+//   - pos: map (optional) - { x: number, y: number }
 //
 // Collection: diaries
 // Document ID: auto-generated or custom string
@@ -74,7 +75,7 @@ service cloud.firestore {
 
     function isValidTask(data) {
       return data.text is string && data.text.size() > 0 && data.text.size() < 1000 &&
-             data.priority in ['IMPORTANT_URGENT', 'IMPORTANT_NOT_URGENT', 'URGENT_NOT_IMPORTANT', 'CASUAL'] &&
+             data.category in ['WORK', 'HEALTH', 'PERSONAL', 'LEARNING'] &&
              data.completed is bool &&
              data.createdAt is number &&
              data.uid is string && data.uid == request.auth.uid;
@@ -100,7 +101,7 @@ service cloud.firestore {
 
     match /tasks/{taskId} {
       allow read: if isAuthenticated() && (resource == null || resource.data.uid == request.auth.uid);
-      allow create: if isAuthenticated() && hasRequiredFields(['id', 'text', 'priority', 'completed', 'createdAt', 'uid']) && isValidTask(request.resource.data);
+      allow create: if isAuthenticated() && hasRequiredFields(['id', 'text', 'category', 'completed', 'createdAt', 'uid']) && isValidTask(request.resource.data);
       allow update: if isAuthenticated() && isDocOwner() && uidNotModified() && isValidTask(request.resource.data);
       allow delete: if isAuthenticated() && isDocOwner();
     }

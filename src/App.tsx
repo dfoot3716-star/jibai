@@ -115,19 +115,12 @@ const handleFirestoreError = (error: unknown, operationType: OperationType, path
   throw new Error(JSON.stringify(errInfo));
 };
 
-enum Priority {
-  IMPORTANT_URGENT = 'IMPORTANT_URGENT',
-  IMPORTANT_NOT_URGENT = 'IMPORTANT_NOT_URGENT',
-  URGENT_NOT_IMPORTANT = 'URGENT_NOT_IMPORTANT',
-  CASUAL = 'CASUAL'
-}
-
 interface Task {
   id: string;
   text: string;
-  priority: Priority;
   completed: boolean;
   createdAt: number;
+  category?: TaskCategory;
 }
 
 interface DiaryEntry {
@@ -145,12 +138,14 @@ interface DayStats {
 
 // --- Constants ---
 
-const PRIORITY_CONFIG = {
-  [Priority.IMPORTANT_URGENT]: { label: '重要紧急', color: 'bg-blue-600', dot: 'w-3 h-3 rounded-full' },
-  [Priority.IMPORTANT_NOT_URGENT]: { label: '重要不急', color: 'bg-blue-400', dot: 'w-3 h-3 rounded-full opacity-70' },
-  [Priority.URGENT_NOT_IMPORTANT]: { label: '紧急不重要', color: 'bg-blue-300', dot: 'w-3 h-3 rounded-full opacity-50' },
-  [Priority.CASUAL]: { label: '随心', color: 'bg-blue-100', dot: 'w-3 h-3 rounded-full opacity-30' },
-};
+const MORANDI_COLORS = {
+  WORK: { label: '工作', color: '#8E9AAF', bg: 'bg-[#8E9AAF]', border: 'border-[#8E9AAF]/30' },
+  HEALTH: { label: '健康', color: '#B1BCA0', bg: 'bg-[#B1BCA0]', border: 'border-[#B1BCA0]/30' },
+  PERSONAL: { label: '生活', color: '#D6A290', bg: 'bg-[#D6A290]', border: 'border-[#D6A290]/30' },
+  LEARNING: { label: '成长', color: '#E2D1B3', bg: 'bg-[#E2D1B3]', border: 'border-[#E2D1B3]/30' },
+} as const;
+
+type TaskCategory = keyof typeof MORANDI_COLORS;
 
 const MOOD_COLORS = [
   { name: '开心', color: '#FFE5B3', description: '明媚的心情' },
@@ -242,7 +237,11 @@ const playSound = (type: 'add' | 'complete' | 'click') => {
 
 // --- Components ---
 
-const Background = ({ time }: { time: Date }) => {
+interface BackgroundProps {
+  time: Date;
+}
+
+const Background = ({ time }: BackgroundProps) => {
   const hour = time.getHours();
   
   const theme = useMemo(() => {
@@ -259,34 +258,33 @@ const Background = ({ time }: { time: Date }) => {
     night: 'from-[#0a192f] to-[#020617]',
   };
 
+  const isNightTheme = theme === 'night' || theme === 'evening';
+
   return (
     <div className={cn("fixed inset-0 -z-10 bg-gradient-to-br transition-colors duration-1000", gradients[theme])}>
-      {theme === 'night' && (
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          {[...Array(50)].map((_, i) => (
-            <motion.div
-              key={i}
-              className="absolute bg-white rounded-full"
-              style={{
-                width: Math.random() * 2 + 1,
-                height: Math.random() * 2 + 1,
-                top: `${Math.random() * 100}%`,
-                left: `${Math.random() * 100}%`,
-                opacity: Math.random() * 0.5 + 0.2,
-              }}
-              animate={{
-                opacity: [0.2, 0.8, 0.2],
-                scale: [1, 1.2, 1],
-              }}
-              transition={{
-                duration: Math.random() * 3 + 2,
-                repeat: Infinity,
-                ease: "easeInOut",
-              }}
-            />
-          ))}
-        </div>
-      )}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {/* Background Stars (Only at night/evening) */}
+        {isNightTheme && [...Array(30)].map((_, i) => (
+          <motion.div
+            key={`bg-star-${i}`}
+            className="absolute bg-white rounded-full"
+            style={{
+              width: Math.random() * 2 + 0.5,
+              height: Math.random() * 2 + 0.5,
+              top: `${Math.random() * 100}%`,
+              left: `${Math.random() * 100}%`,
+              opacity: Math.random() * 0.3 + 0.1,
+            }}
+            animate={{
+              opacity: [0.1, 0.4, 0.1],
+            }}
+            transition={{
+              duration: Math.random() * 10 + 10,
+              repeat: Infinity,
+            }}
+          />
+        ))}
+      </div>
     </div>
   );
 };
@@ -388,7 +386,11 @@ const TaskItem = ({ task, isNight, toggleTask, deleteTask }: TaskItemProps) => {
           {task.completed && <Check size={14} className="text-white" />}
         </button>
         
-        <div className="flex-1">
+        <div className="flex-1 flex items-center gap-3">
+          <div className={cn(
+            "w-2 h-2 rounded-full",
+            task.category ? MORANDI_COLORS[task.category].bg : 'bg-blue-400/30'
+          )} />
           <p className={cn(
             "text-lg font-light transition-all",
             task.completed && "line-through"
@@ -411,7 +413,7 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState(startOfDay(new Date()));
   const [showAddModal, setShowAddModal] = useState(false);
   const [newTaskText, setNewTaskText] = useState('');
-  const [newTaskPriority, setNewTaskPriority] = useState<Priority>(Priority.IMPORTANT_URGENT);
+  const [newTaskCategory, setNewTaskCategory] = useState<TaskCategory>('WORK');
   const [isLoaded, setIsLoaded] = useState(false);
   const [showIntro, setShowIntro] = useState(true);
   
@@ -789,18 +791,18 @@ export default function App() {
 
   const addTask = async () => {
     if (!newTaskText.trim() || !user) return;
-    const newTask = {
+    const newTask: Task = {
       text: newTaskText,
-      priority: newTaskPriority,
       completed: false,
       createdAt: startOfDay(selectedDate).getTime() + (Date.now() % (24 * 60 * 60 * 1000)),
       uid: user.uid,
-      id: generateId()
-    };
+      id: generateId(),
+      category: newTaskCategory
+    } as any;
     try {
-      // Optimistic UI close
       setShowAddModal(false);
       setNewTaskText('');
+      setNewTaskCategory('WORK');
       playSound('add');
       await setDoc(doc(db, 'tasks', newTask.id), newTask);
     } catch (error) {
@@ -812,14 +814,16 @@ export default function App() {
     const task = tasks.find(t => t.id === id);
     if (!task) return;
     
-    if (!task.completed) {
+    const isNowCompleted = !task.completed;
+    
+    if (isNowCompleted) {
       playSound('complete');
     } else {
       playSound('click');
     }
     
     try {
-      await updateDoc(doc(db, 'tasks', id), { completed: !task.completed });
+      await updateDoc(doc(db, 'tasks', id), { completed: isNowCompleted });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `tasks/${id}`);
     }
@@ -924,8 +928,24 @@ export default function App() {
 
       if (!apiKey) throw new Error("API Key not found");
 
+      // AI Memory Context
+      const memoryContext = diaries
+        .filter(d => d.date !== dateKey)
+        .slice(-3)
+        .map(d => `[${d.date}]: ${d.content}`)
+        .join('\n');
+
+      const systemInstruction = `你是一个观察着用户星空的知己。
+这是用户过去几天的生活碎片（记忆）：
+${memoryContext}
+
+用户今天的日记：
+${diaryContent}
+
+如果上面的日记为空，说明用户现在正在对话中整理心情。
+请结合记忆和现状，以自然、真诚的方式与用户对话。你可以参考用户提到的事展现出你一直在。如果用户要求你扮演特定角色，请配合。回复要简洁、温暖。`;
+
       let aiText = "";
-      const systemInstruction = `你是一个温柔、富有同理心的日记助手。用户正在写关于 ${dateKey} 的日记。日记内容是：“${diaryContent}”。请根据日记内容和用户的提问，提供有深度的反馈、鼓励或建议。保持简洁、诗意且温暖。`;
 
       if (protocol === 'gemini') {
         const ai = new GoogleGenAI({ apiKey } as any);
@@ -1219,33 +1239,18 @@ export default function App() {
                     <p className="font-serif italic">每个计划的开始都是黎明</p>
                   </div>
                 ) : (
-                  <div className="space-y-8">
-                    {Object.entries(PRIORITY_CONFIG).map(([priority, config]) => {
-                      const priorityTasks = filteredTasks.filter(t => t.priority === priority);
-                      if (priorityTasks.length === 0) return null;
-                      
-                      return (
-                        <div key={priority} className="space-y-4">
-                          <div className="flex items-center gap-2 opacity-30">
-                            <div className={cn("w-1 h-1 rounded-full", config.color)} />
-                            <p className="text-[9px] uppercase tracking-[0.2em] font-bold">{config.label}</p>
-                          </div>
-                          <div className="space-y-4">
-                            {priorityTasks
-                              .sort((a, b) => (a.completed === b.completed ? 0 : a.completed ? 1 : -1))
-                              .map(task => (
-                                <TaskItem 
-                                  key={task.id} 
-                                  task={task} 
-                                  isNight={isNight} 
-                                  toggleTask={toggleTask} 
-                                  deleteTask={deleteTask} 
-                                />
-                              ))}
-                          </div>
-                        </div>
-                      );
-                    })}
+                  <div className="space-y-4">
+                    {filteredTasks
+                      .sort((a, b) => (a.completed === b.completed ? 0 : a.completed ? 1 : -1))
+                      .map(task => (
+                        <TaskItem 
+                          key={task.id} 
+                          task={task} 
+                          isNight={isNight} 
+                          toggleTask={toggleTask} 
+                          deleteTask={deleteTask} 
+                        />
+                      ))}
                   </div>
                 )}
               </motion.div>
@@ -1477,26 +1482,26 @@ export default function App() {
                   <p className={cn(
                     "text-[10px] uppercase tracking-[0.3em] font-bold transition-opacity duration-500",
                     isNight ? "text-white opacity-30" : "text-slate-900 opacity-30"
-                  )}>优先级</p>
-                  <div className="grid grid-cols-2 gap-3 md:gap-4">
-                    {Object.entries(PRIORITY_CONFIG).map(([key, config]) => (
+                  )}>类别</p>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    {Object.entries(MORANDI_COLORS).map(([key, config]) => (
                       <button
                         key={key}
                         onClick={() => {
                           playSound('click');
-                          setNewTaskPriority(key as Priority);
+                          setNewTaskCategory(key as TaskCategory);
                         }}
                         className={cn(
-                          "flex items-center gap-2 md:gap-4 p-3 md:p-5 rounded-2xl md:rounded-3xl border transition-all duration-300",
-                          newTaskPriority === key 
-                            ? "bg-blue-500 text-white border-blue-500 shadow-xl shadow-blue-500/20 scale-[1.02]" 
+                          "flex items-center gap-2 p-3 rounded-2xl border transition-all duration-300",
+                          newTaskCategory === key 
+                            ? "bg-white text-slate-900 border-white shadow-xl" 
                             : isNight 
-                              ? "bg-white/5 border-white/10 text-white opacity-40 hover:opacity-100"
-                              : "bg-black/5 border-black/10 text-slate-900 opacity-40 hover:opacity-100"
+                              ? "bg-white/5 border-white/10 text-white opacity-40"
+                              : "bg-black/5 border-black/10 text-slate-900 opacity-40"
                         )}
                       >
-                        <div className={cn(config.dot, "shrink-0", newTaskPriority === key ? "bg-white" : config.color)} />
-                        <span className="text-xs md:text-sm tracking-wide whitespace-nowrap">{config.label}</span>
+                        <div className={cn("w-2 h-2 rounded-full", config.bg)} />
+                        <span className="text-[10px] tracking-widest uppercase">{config.label}</span>
                       </button>
                     ))}
                   </div>
